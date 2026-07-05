@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { put, list, del } from '@vercel/blob';
+import { listImages } from '../api/lib/blob-storage.js';
 import {
   createGenerativeAI,
   generateWithProviderFallback,
@@ -375,111 +376,55 @@ app.get('/api/enhancement-modes', (req, res) => {
 app.get('/api/admin/images/:folderType', async (req, res) => {
   try {
     const { folderType } = req.params;
-    
+
     if (folderType !== 'enhancement' && folderType !== 'translation') {
       return res.status(400).json({ error: 'Invalid folder type' });
     }
-    
-    // On Vercel, fetch from Blob Storage
-    if (IS_VERCEL) {
+
+    const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+
+    // Use Blob when token is set (local dev + Vercel) — matches saveUploadedImage behavior
+    if (BLOB_TOKEN) {
       try {
-        const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
-        
-        if (!BLOB_TOKEN) {
-          return res.json({ 
-            images: [],
-            message: 'BLOB_READ_WRITE_TOKEN not set. Files cannot be retrieved.',
-            vercel: true
-          });
-        }
-        
-        // List all blobs in the folder
-        const { blobs } = await list({
-          prefix: `${folderType}/`,
-          limit: 1000,
-          token: BLOB_TOKEN,
-        });
-        
-        // Filter for image files and metadata files
-        const imageFiles = blobs.filter(blob => {
-          const ext = path.extname(blob.pathname).toLowerCase();
-          return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext);
-        });
-        
-        // Build images array with metadata
-        const images = await Promise.all(
-          imageFiles.map(async (blob) => {
-            // Try to find corresponding metadata file
-            const metadataFilename = blob.pathname.replace(/\.[^/.]+$/, '') + '.json';
-            const metadataBlob = blobs.find(b => b.pathname === metadataFilename);
-            
-            let metadata = {};
-            if (metadataBlob) {
-              try {
-                const metadataResponse = await fetch(metadataBlob.url);
-                metadata = await metadataResponse.json();
-              } catch (e) {
-                console.error('Error reading metadata from blob:', e);
-              }
-            }
-            
-            return {
-              filename: path.basename(blob.pathname),
-              url: blob.url,
-              size: blob.size,
-              created: new Date(blob.uploadedAt),
-              modified: new Date(blob.uploadedAt),
-              ...metadata
-            };
-          })
-        );
-        
-        // Sort by created date (newest first)
-        images.sort((a, b) => new Date(b.created) - new Date(a.created));
-        
-        console.log(`✅ Retrieved ${images.length} images from Blob Storage`);
+        const { images } = await listImages(folderType);
+        console.log(`✅ Retrieved ${images.length} images from Blob Storage (${folderType})`);
         return res.json({ images });
       } catch (blobError) {
         console.error('❌ Error fetching from Vercel Blob:', blobError);
-        console.error('   Error message:', blobError.message);
-        
-        // If on Vercel, return error. Otherwise fall back to filesystem
         if (IS_VERCEL) {
-          return res.status(500).json({ 
-            error: 'Failed to fetch images from Blob Storage', 
-            details: blobError.message 
+          return res.status(500).json({
+            error: 'Failed to fetch images from Blob Storage',
+            details: blobError.message,
           });
         }
-        console.warn('   Falling back to filesystem...');
+        console.warn('   Falling back to local filesystem...');
       }
     } else if (IS_VERCEL) {
-      // On Vercel without token, return empty
-      return res.json({ 
+      return res.json({
         images: [],
         message: 'BLOB_READ_WRITE_TOKEN not set. Files cannot be retrieved.',
-        vercel: true
       });
     }
-    
-    // Local development - read from filesystem (or fallback)
+
+    // Local fallback — filesystem (only when Blob unavailable)
     const folderPath = UPLOAD_DIRS[folderType];
-    
+
     if (!fs.existsSync(folderPath)) {
       return res.json({ images: [] });
     }
-    
+
     const files = fs.readdirSync(folderPath);
     const images = files
-      .filter(file => {
+      .filter((file) => {
         const ext = path.extname(file).toLowerCase();
         return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext);
       })
-      .map(file => {
+      .map((file) => {
         const filePath = path.join(folderPath, file);
         const stats = fs.statSync(filePath);
         const metadataFile = file.replace(/\.[^/.]+$/, '') + '.json';
         const metadataPath = path.join(folderPath, metadataFile);
-        
+
         let metadata = {};
         if (fs.existsSync(metadataPath)) {
           try {
@@ -488,18 +433,18 @@ app.get('/api/admin/images/:folderType', async (req, res) => {
             console.error('Error reading metadata:', e);
           }
         }
-        
+
         return {
           filename: file,
           url: `/uploads/${folderType}/${file}`,
           size: stats.size,
           created: stats.birthtime,
           modified: stats.mtime,
-          ...metadata
+          ...metadata,
         };
       })
-      .sort((a, b) => new Date(b.created) - new Date(a.created)); // Newest first
-    
+      .sort((a, b) => new Date(b.created) - new Date(a.created));
+
     res.json({ images });
   } catch (error) {
     console.error('Error listing images:', error);

@@ -3,6 +3,7 @@ import { Sparkles } from "lucide-react";
 import { ImageUpload } from "@/components/shared/ImageUpload";
 import { OptionGrid } from "@/components/shared/OptionGrid";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
+import { IntensityBars } from "@/components/shared/IntensityBars";
 import { OutputPanel } from "@/components/shared/OutputPanel";
 import { useImageEnhancement } from "@/hooks/useImageEnhancement";
 import { ENHANCEMENT_STYLES, INTENSITY_OPTIONS } from "@/lib/constants";
@@ -62,7 +63,11 @@ export const EnhancementWorkflow = () => {
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted-foreground">Intensity</p>
             <SegmentedControl
-              options={INTENSITY_OPTIONS.map(({ id, label }) => ({ id, label }))}
+              options={INTENSITY_OPTIONS.map(({ id, label, level }) => ({
+                id,
+                label,
+                icon: <IntensityBars level={level} />,
+              }))}
               value={intensity}
               onChange={setIntensity}
               disabled={isProcessing}

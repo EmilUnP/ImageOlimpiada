@@ -12,7 +12,7 @@ export const ENHANCEMENT_STYLES = [
 ] as const;
 
 export const INTENSITY_OPTIONS = [
-  { id: 'low', label: 'Soft' },
-  { id: 'medium', label: 'Balanced' },
-  { id: 'high', label: 'Strong' },
+  { id: 'low', label: 'Soft', level: 1 as const },
+  { id: 'medium', label: 'Balanced', level: 2 as const },
+  { id: 'high', label: 'Strong', level: 3 as const },
 ] as const;
