@@ -24,9 +24,9 @@ export const OptionGrid = ({
   disabled = false,
 }: OptionGridProps) => {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <h3 className="text-sm font-semibold">{title}</h3>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-1.5">
         {items.map((item) => {
           const isSelected = selectedId === item.id;
           return (
@@ -35,20 +35,21 @@ export const OptionGrid = ({
               type="button"
               disabled={disabled}
               onClick={() => onSelect(item.id)}
+              aria-pressed={isSelected}
               className={cn(
-                "flex flex-col items-center justify-center rounded-xl border px-2 py-3 text-center transition-all",
+                "flex flex-col items-center justify-center rounded-xl border px-2 py-2.5 text-center transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 isSelected
-                  ? "border-primary bg-primary/10 ring-1 ring-primary/30"
-                  : "border-border/60 bg-card hover:border-primary/40 hover:bg-muted/40",
+                  ? "border-primary/60 bg-primary/10 shadow-sm ring-1 ring-primary/25 scale-[1.02]"
+                  : "border-border/50 bg-card/80 hover:border-primary/30 hover:bg-muted/40",
                 disabled && "opacity-50 cursor-not-allowed"
               )}
             >
               {item.flagCode ? (
-                <FlagIcon code={item.flagCode} title={item.name} className="mb-1.5 h-6 w-9" />
+                <FlagIcon code={item.flagCode} title={item.name} className="mb-1 h-5 w-8" />
               ) : item.emoji ? (
-                <span className="text-xl mb-1">{item.emoji}</span>
+                <span className="text-lg mb-0.5 leading-none">{item.emoji}</span>
               ) : null}
-              <span className="text-xs font-medium">{item.name}</span>
+              <span className="text-[11px] font-medium leading-tight">{item.name}</span>
             </button>
           );
         })}

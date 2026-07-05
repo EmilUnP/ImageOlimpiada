@@ -217,7 +217,7 @@ All colors MUST be HSL.
   }
 
   .animate-fade-in {
-    animation: fadeIn 0.5s ease-out;
+    animation: fadeIn 0.35s ease-out;
   }
 
   .animate-slide-in {
@@ -364,5 +364,13 @@ All colors MUST be HSL.
 
   .transition-bounce {
     transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  .app-shell {
+    background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(220 30% 96%) 100%);
+  }
+
+  .dark .app-shell {
+    background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(222 47% 5%) 100%);
   }
 }

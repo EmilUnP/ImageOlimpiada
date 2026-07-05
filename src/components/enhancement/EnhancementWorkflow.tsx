@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { ImageUpload } from "@/components/shared/ImageUpload";
 import { OptionGrid } from "@/components/shared/OptionGrid";
+import { Panel } from "@/components/shared/Panel";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { IntensityBars } from "@/components/shared/IntensityBars";
 import { OutputPanel } from "@/components/shared/OutputPanel";
+import { WorkflowHeader } from "@/components/shared/WorkflowHeader";
 import { useImageEnhancement } from "@/hooks/useImageEnhancement";
 import { ENHANCEMENT_STYLES, INTENSITY_OPTIONS } from "@/lib/constants";
 import { downloadImage } from "@/lib/utils";
@@ -17,74 +19,68 @@ export const EnhancementWorkflow = () => {
   const { enhancedImage, isProcessing, handleImageSelect } = useImageEnhancement();
 
   const selectedStyle = ENHANCEMENT_STYLES.find((s) => s.id === mode);
+  const intensityLabel = INTENSITY_OPTIONS.find((i) => i.id === intensity)?.label.toLowerCase();
 
   const handleDownload = () => {
     if (!enhancedImage) return;
     downloadImage(enhancedImage, "enhanced-image.png");
-    toast.success("Image downloaded!");
+    toast.success("Image downloaded");
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Sparkles className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold">Image Enhancement</h1>
-          <p className="text-sm text-muted-foreground">
-            Clean up old book scans · {selectedStyle?.name} · {INTENSITY_OPTIONS.find((i) => i.id === intensity)?.label.toLowerCase()}
-          </p>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <WorkflowHeader
+        icon={<Sparkles className="h-5 w-5" />}
+        title="Image Enhancement"
+        subtitle={`${selectedStyle?.name ?? "Book question"} · ${intensityLabel ?? "balanced"} intensity`}
+      />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_minmax(260px,320px)] gap-5">
-        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[200px_minmax(0,1fr)_minmax(240px,300px)] gap-4">
+        <Panel>
           <OptionGrid
-            title="Styles"
+            title="Style"
             items={ENHANCEMENT_STYLES.map(({ id, name, emoji }) => ({ id, name, emoji }))}
             selectedId={mode}
             onSelect={setMode}
             disabled={isProcessing}
           />
-        </section>
+        </Panel>
 
-        <section className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-5">
-          <div>
-            <h3 className="text-sm font-semibold mb-3">Workspace</h3>
+        <Panel title="Workspace" description="Upload a scanned page to enhance">
+          <div className="space-y-4">
             <ImageUpload
               onImageSelect={(file) => handleImageSelect(file, mode, intensity)}
               disabled={isProcessing}
               label="Upload book page"
-              description="Scanned exam material — any subject, ~12k image archive"
+              description="Any subject — full page or cropped question"
             />
-          </div>
 
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Intensity</p>
-            <SegmentedControl
-              options={INTENSITY_OPTIONS.map(({ id, label, level }) => ({
-                id,
-                label,
-                icon: <IntensityBars level={level} />,
-              }))}
-              value={intensity}
-              onChange={setIntensity}
-              disabled={isProcessing}
-            />
+            <div className="space-y-2 pt-1 border-t border-border/40">
+              <p className="text-xs font-medium text-muted-foreground">Enhancement strength</p>
+              <SegmentedControl
+                options={INTENSITY_OPTIONS.map(({ id, label, level }) => ({
+                  id,
+                  label,
+                  icon: <IntensityBars level={level} />,
+                }))}
+                value={intensity}
+                onChange={setIntensity}
+                disabled={isProcessing}
+              />
+            </div>
           </div>
-        </section>
+        </Panel>
 
-        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+        <Panel>
           <OutputPanel
             description={selectedStyle?.description}
             image={enhancedImage}
             isProcessing={isProcessing}
-            processingLabel="Enhancing your image..."
+            processingLabel="Enhancing your image…"
             emptyLabel="Upload an image to see the result"
             onDownload={enhancedImage ? handleDownload : undefined}
           />
-        </section>
+        </Panel>
       </div>
     </div>
   );

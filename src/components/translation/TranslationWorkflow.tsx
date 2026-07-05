@@ -1,8 +1,12 @@
-import { useState } from "react";
-import { Languages, Loader2 } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Languages, Loader2, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ImageUpload } from "@/components/shared/ImageUpload";
 import { OptionGrid } from "@/components/shared/OptionGrid";
 import { OutputPanel } from "@/components/shared/OutputPanel";
+import { Panel } from "@/components/shared/Panel";
+import { WorkflowHeader } from "@/components/shared/WorkflowHeader";
+import { StepIndicator, getStepStatus } from "@/components/shared/StepIndicator";
 import { TextDetectionAndTranslation } from "./TextDetectionAndTranslation";
 import type { DetectedText, TranslatedText } from "@/lib/types";
 import { useImageTranslation } from "@/hooks/useImageTranslation";
@@ -34,9 +38,22 @@ export const TranslationWorkflow = () => {
     translateTexts,
     processTranslation,
     setDetectedTexts,
+    reset,
   } = useImageTranslation();
 
   const languageName = LANGUAGES.find((l) => l.code === selectedLanguage)?.name || selectedLanguage;
+
+  const steps = useMemo(() => {
+    const uploadDone = !!originalImage;
+    const reviewDone = !!translatedImage;
+    const onReview = showTextReview && !translatedImage;
+
+    return [
+      { number: 1, label: "Upload", status: getStepStatus(uploadDone, !uploadDone) },
+      { number: 2, label: "Review", status: getStepStatus(reviewDone, onReview) },
+      { number: 3, label: "Result", status: getStepStatus(reviewDone, uploadDone && !reviewDone && !onReview) },
+    ];
+  }, [originalImage, showTextReview, translatedImage]);
 
   const handleImageUpload = async (file: File) => {
     const base64Image = await handleImageSelect(file, selectedLanguage);
@@ -83,54 +100,54 @@ export const TranslationWorkflow = () => {
     }
   };
 
+  const handleStartOver = () => {
+    reset();
+    setShowTextReview(false);
+  };
+
   const handleDownload = () => {
     if (!translatedImage) return;
     downloadImage(translatedImage, "translated-image.png");
-    toast.success("Image downloaded!");
+    toast.success("Image downloaded");
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
-          <Languages className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold">Text Translation</h1>
-          <p className="text-sm text-muted-foreground">
-            Translate Russian book questions to {languageName}
-          </p>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <WorkflowHeader
+        icon={<Languages className="h-5 w-5" />}
+        iconClassName="bg-accent/10 text-accent"
+        title="Text Translation"
+        subtitle={`Russian book questions → ${languageName}`}
+      />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_minmax(260px,320px)] gap-5">
-        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+      <StepIndicator steps={steps} className="pb-1" />
+
+      <div className="grid grid-cols-1 xl:grid-cols-[200px_minmax(0,1fr)_minmax(240px,300px)] gap-4">
+        <Panel>
           <OptionGrid
-            title="Language"
+            title="Target language"
             items={LANGUAGES.map(({ code, name, flagCode }) => ({ id: code, name, flagCode }))}
             selectedId={selectedLanguage}
             onSelect={setSelectedLanguage}
             disabled={isProcessing || isDetecting || showTextReview}
           />
-        </section>
+        </Panel>
 
-        <section className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-4">
-          <h3 className="text-sm font-semibold">Workspace</h3>
-
+        <Panel title="Workspace" description="Upload, review detected text, then apply">
           {!originalImage || showTextReview ? (
-            <>
+            <div className="space-y-4">
               {!showTextReview && (
                 <>
                   <ImageUpload
                     onImageSelect={handleImageUpload}
                     disabled={isProcessing || isDetecting}
                     label="Upload book page"
-                    description="Russian math, physics, chemistry, or history question"
+                    description="Russian math, physics, chemistry, or history"
                   />
                   {isDetecting && (
-                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Detecting text...
+                    <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      Detecting text…
                     </div>
                   )}
                 </>
@@ -149,24 +166,30 @@ export const TranslationWorkflow = () => {
                   isApplying={isProcessing}
                 />
               )}
-            </>
+            </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Translation complete. View the result on the right or upload a new image to start over.
-            </p>
+            <div className="flex flex-col items-center justify-center gap-4 py-8 text-center">
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Translation complete. Check the result panel or start a new page.
+              </p>
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleStartOver}>
+                <RotateCcw className="h-3.5 w-3.5" />
+                New image
+              </Button>
+            </div>
           )}
-        </section>
+        </Panel>
 
-        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+        <Panel>
           <OutputPanel
             description={`Translated to ${languageName}`}
             image={translatedImage}
             isProcessing={isProcessing}
-            processingLabel="Applying translation..."
+            processingLabel="Applying translation…"
             emptyLabel="Upload a book page to see the translation"
             onDownload={translatedImage ? handleDownload : undefined}
           />
-        </section>
+        </Panel>
       </div>
     </div>
   );
