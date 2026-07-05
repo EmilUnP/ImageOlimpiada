@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { applyTextOverlaysToImage } from '../server/lib/local-image-translation.js';
 
@@ -205,12 +205,9 @@ export default async function handler(req, res) {
       console.error('translate-image: Error saving uploaded image:', saveError);
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      res.status(500).json({
-        error: 'AI service not configured. Please set GEMINI_API_KEY environment variable',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to Vercel environment variables',
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      res.status(configError.status).json(configError.body);
       return;
     }
 
@@ -237,8 +234,8 @@ export default async function handler(req, res) {
       enhanceReadability,
     });
 
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-pro-image-preview' });
+    const genAI = createGenerativeAI();
+    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
 
     const mimeType = extractMimeType(image);
     const base64Data = extractBase64Data(image);
@@ -294,10 +291,11 @@ export default async function handler(req, res) {
         targetLanguage: targetLangName,
       });
     } catch (error) {
-      console.error('translate-image: Gemini API error:', error);
-      res.status(500).json({
-        error: 'Failed to translate image',
-        details: error?.message || 'Unknown error',
+      console.error('translate-image: AI API error:', error);
+      const aiError = classifyAiError(error);
+      res.status(aiError.status).json({
+        error: aiError.message,
+        details: aiError.details,
       });
     }
   } catch (error) {

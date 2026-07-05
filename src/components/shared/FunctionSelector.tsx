@@ -1,8 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Languages, Zap, Palette } from "lucide-react";
+import { Sparkles, Languages } from "lucide-react";
 
-type AppFunction = 'enhance' | 'translate' | 'icons' | 'logos' | null;
+type AppFunction = 'enhance' | 'translate' | null;
 
 interface FunctionSelectorProps {
   onFunctionSelect: (func: AppFunction) => void;
@@ -16,7 +16,7 @@ export const FunctionSelector = ({ onFunctionSelect }: FunctionSelectorProps) =>
         <p className="text-muted-foreground text-sm">Select what you'd like to do with your images</p>
       </div>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid md:grid-cols-2 gap-6">
         {/* Image Quality Improver */}
         <Card 
           className="border hover:border-primary/60 transition-all duration-300 cursor-pointer group relative overflow-hidden hover:shadow-md"
@@ -113,106 +113,6 @@ export const FunctionSelector = ({ onFunctionSelect }: FunctionSelectorProps) =>
               onClick={() => onFunctionSelect('translate')}
             >
               Use Text Translation
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Icon Generation */}
-        <Card 
-          className="border hover:border-primary/60 transition-all duration-300 cursor-pointer group relative overflow-hidden hover:shadow-md"
-          onClick={() => onFunctionSelect('icons')}
-        >
-          <CardHeader className="pb-4">
-            <div className="flex items-start gap-4">
-              <div className="relative flex-shrink-0">
-                <div className="p-3 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
-                  <Zap className="w-6 h-6 text-primary" />
-                </div>
-              </div>
-              <div className="flex-1 min-w-0 pt-1">
-                <CardTitle className="text-xl font-bold mb-2">Icon Generator</CardTitle>
-                <CardDescription className="text-sm">
-                  Generate or upgrade powerful icons and web elements using AI. Create custom icons from text descriptions or enhance existing ones.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <ul className="space-y-2 text-sm">
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-primary text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Generate icons from text descriptions</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-primary text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Upgrade existing icons with AI</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-primary text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Export in multiple sizes for web projects</span>
-              </li>
-            </ul>
-            <Button 
-              className="w-full"
-              onClick={() => onFunctionSelect('icons')}
-            >
-              Use Icon Generator
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Logo Generation */}
-        <Card 
-          className="border hover:border-accent/60 transition-all duration-300 cursor-pointer group relative overflow-hidden hover:shadow-md"
-          onClick={() => onFunctionSelect('logos')}
-        >
-          <CardHeader className="pb-4">
-            <div className="flex items-start gap-4">
-              <div className="relative flex-shrink-0">
-                <div className="p-3 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
-                  <Palette className="w-6 h-6 text-accent" />
-                </div>
-              </div>
-              <div className="flex-1 min-w-0 pt-1">
-                <CardTitle className="text-xl font-bold mb-2">Logo Generator</CardTitle>
-                <CardDescription className="text-sm">
-                  Create professional logos for your brand or business using AI. Generate unique logo designs from text descriptions or upgrade existing logos.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <ul className="space-y-2 text-sm">
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center">
-                  <span className="text-accent text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Generate professional logos from descriptions</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center">
-                  <span className="text-accent text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Upgrade existing logos with AI</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center">
-                  <span className="text-accent text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Multiple styles and customization options</span>
-              </li>
-            </ul>
-            <Button 
-              className="w-full"
-              onClick={() => onFunctionSelect('logos')}
-            >
-              Use Logo Generator
             </Button>
           </CardContent>
         </Card>

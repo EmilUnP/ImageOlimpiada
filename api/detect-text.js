@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 
 const AVAILABLE_MODELS = [
@@ -171,19 +171,16 @@ export default async function handler(req, res) {
       console.error('Error saving uploaded image for analysis:', saveError);
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      res.status(500).json({
-        error: 'AI service not configured. Please set GEMINI_API_KEY environment variable',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to Vercel environment variables',
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      res.status(configError.status).json(configError.body);
       return;
     }
 
     const preferredModel =
       requestedModel && AVAILABLE_MODELS.includes(requestedModel) ? requestedModel : AVAILABLE_MODELS[0];
 
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const genAI = createGenerativeAI();
     const triedModels = new Set();
     let usedModel = preferredModel;
     let responseText = null;

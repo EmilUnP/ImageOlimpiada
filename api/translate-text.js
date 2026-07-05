@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createGenerativeAI, validateAiConfig } from '../server/lib/ai-provider.js';
 import {
   createTextTranslationService,
   TranslationServiceError,
@@ -28,15 +28,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No texts provided' });
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({
-        error: 'AI service not configured. Please set GEMINI_API_KEY environment variable',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to Vercel environment variables',
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      return res.status(configError.status).json(configError.body);
     }
 
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const genAI = createGenerativeAI();
     const translator = createTextTranslationService(genAI);
     const { translations, sanitizedCount, targetLanguageName } = await translator.translateTexts({
       texts,

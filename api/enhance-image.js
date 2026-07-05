@@ -1,5 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { saveUploadedImage } from './lib/blob-storage.js';
+import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
 
 // Enhancement mode prompts
 const enhancementPrompts = {
@@ -73,12 +73,9 @@ export default async function handler(req, res) {
       console.error('Error saving uploaded image:', saveError);
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY environment variable',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to Vercel environment variables'
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      return res.status(configError.status).json(configError.body);
     }
 
     // Validate mode
@@ -97,9 +94,8 @@ export default async function handler(req, res) {
 
     const prompt = enhancementConfig.prompt + intensityModifier;
 
-    // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
+    const genAI = createGenerativeAI();
+    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
 
     try {
       // Determine MIME type from base64 string
@@ -151,23 +147,13 @@ export default async function handler(req, res) {
       }
 
     } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('401')) {
-        return res.status(401).json({ error: 'Invalid API key. Please check your GEMINI_API_KEY.' });
-      }
-      
-      if (error.message?.includes('QUOTA_EXCEEDED') || error.message?.includes('429') || error.message?.includes('quota')) {
-        return res.status(429).json({ 
-          error: 'API quota exceeded. You have used up your free tier limit.',
-          message: 'Please wait a few minutes and try again, or upgrade your API plan.',
-          retryAfter: '42 seconds'
-        });
-      }
-
-      return res.status(500).json({ 
-        error: 'Failed to process image', 
-        details: error.message || 'Unknown error'
+      console.error('AI API error:', error);
+      const aiError = classifyAiError(error);
+      return res.status(aiError.status).json({
+        error: aiError.message,
+        message: aiError.message,
+        details: aiError.details,
+        retryAfter: aiError.retryAfter,
       });
     }
 

@@ -2,12 +2,18 @@
 
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { put, list, del } from '@vercel/blob';
+import {
+  createGenerativeAI,
+  validateAiConfig,
+  classifyAiError,
+  resolveAiProvider,
+  DEFAULT_IMAGE_MODEL,
+} from './lib/ai-provider.js';
 import {
   createTextTranslationService,
   TranslationServiceError,
@@ -634,12 +640,9 @@ app.post('/api/enhance-image', async (req, res) => {
       endpoint: '/api/enhance-image'
     });
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env'
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      return res.status(configError.status).json(configError.body);
     }
 
     // Validate mode
@@ -659,8 +662,8 @@ app.post('/api/enhance-image', async (req, res) => {
     const prompt = enhancementConfig.prompt + intensityModifier;
 
     // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
+    const genAI = createGenerativeAI();
+    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
 
     try {
       // Determine MIME type from base64 string
@@ -712,611 +715,13 @@ app.post('/api/enhance-image', async (req, res) => {
       }
 
     } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('401')) {
-        return res.status(401).json({ error: 'Invalid API key. Please check your GEMINI_API_KEY.' });
-      }
-      
-      if (error.message?.includes('QUOTA_EXCEEDED') || error.message?.includes('429') || error.message?.includes('quota')) {
-        return res.status(429).json({ 
-          error: 'API quota exceeded. You have used up your free tier limit.',
-          message: 'Please wait a few minutes and try again, or upgrade your API plan.',
-          retryAfter: '42 seconds'
-        });
-      }
-
-      return res.status(500).json({ 
-        error: 'Failed to process image', 
-        details: error.message || 'Unknown error'
-      });
-    }
-
-  } catch (error) {
-    return res.status(500).json({ 
-      error: 'An unexpected error occurred', 
-      details: error.message || 'Unknown error'
-    });
-  }
-});
-
-// Icon generation style prompts
-const iconStylePrompts = {
-  modern: {
-    prompt: 'Create a modern, sleek icon with clean lines, contemporary design, and professional appearance.',
-    description: "Contemporary design with smooth edges"
-  },
-  minimalist: {
-    prompt: 'Create a minimalist icon with simple shapes, minimal details, and clean aesthetics.',
-    description: "Simple, clean, and essential elements only"
-  },
-  bold: {
-    prompt: 'Create a bold, eye-catching icon with strong colors, thick strokes, and impactful design.',
-    description: "Strong visual presence with vibrant colors"
-  },
-  outline: {
-    prompt: 'Create an outlined icon with stroke-based design, no fills, and clear boundaries.',
-    description: "Line-based design without fills"
-  },
-  filled: {
-    prompt: 'Create a filled icon with solid colors, complete shapes, and rich visual presence.',
-    description: "Solid colors with complete shapes"
-  },
-  gradient: {
-    prompt: 'Create a gradient icon with smooth color transitions, depth, and modern gradient effects.',
-    description: "Smooth color transitions and depth"
-  },
-  '3d': {
-    prompt: 'Create a 3D icon with depth, shadows, highlights, and dimensional appearance.',
-    description: "Three-dimensional design with depth"
-  },
-  flat: {
-    prompt: 'Create a flat icon with 2D design, simple colors, and no shadows or gradients.',
-    description: "Simple 2D design without depth effects"
-  }
-};
-
-// Icon upgrade level prompts
-const iconUpgradeLevelPrompts = {
-  low: {
-    prompt: 'Apply subtle improvements: slightly enhance sharpness, improve contrast, and refine edges.',
-    description: "Minimal changes while preserving original design"
-  },
-  medium: {
-    prompt: 'Apply balanced improvements: enhance clarity, improve colors, refine details, and optimize for web use.',
-    description: "Moderate enhancements for better quality"
-  },
-  high: {
-    prompt: 'Apply maximum improvements: significantly enhance quality, optimize colors, perfect edges, add polish, and create professional-grade icon.',
-    description: "Comprehensive upgrade for maximum quality"
-  }
-};
-
-// Generate icon endpoint
-app.post('/api/generate-icon', async (req, res) => {
-  try {
-    const { prompt, style = 'modern', size = '512' } = req.body;
-    
-    if (!prompt || !prompt.trim()) {
-      return res.status(400).json({ error: 'No prompt provided' });
-    }
-
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env'
-      });
-    }
-
-    // Validate style
-    const validStyle = iconStylePrompts[style] ? style : 'modern';
-    const styleConfig = iconStylePrompts[validStyle];
-
-    // Build the icon generation prompt
-    const iconPrompt = `Generate a high-quality icon for web use. ${styleConfig.prompt} The icon should represent: "${prompt}". Make it suitable for use in modern web applications, with clear visual communication, scalable design, and appropriate size of ${size}x${size} pixels. The icon should be professional, recognizable, and suitable for both light and dark backgrounds.`;
-
-    // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
-
-    try {
-      const result = await model.generateContent([iconPrompt]);
-      const response = await result.response;
-      
-      // Try to get image from response
-      let generatedImageBase64 = null;
-      let mimeType = "image/png";
-      
-      if (response.candidates && response.candidates[0]) {
-        const parts = response.candidates[0].content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData?.data) {
-            generatedImageBase64 = part.inlineData.data;
-            if (part.inlineData.mimeType) {
-              mimeType = part.inlineData.mimeType;
-            }
-            break;
-          }
-        }
-      }
-      
-      // If icon is generated, return it
-      if (generatedImageBase64) {
-        return res.json({ 
-          generatedIcon: `data:${mimeType};base64,${generatedImageBase64}`,
-          message: `Icon generated successfully using ${validStyle} style.`,
-          style: validStyle,
-          actualPrompt: iconPrompt
-        });
-      } else {
-        // Return error if no image generated
-        const text = response.text();
-        return res.json({ 
-          generatedIcon: null,
-          analysis: text,
-          message: `Icon generation attempted. Note: Gemini may provide text descriptions. Please refine your prompt.`,
-          style: validStyle,
-          actualPrompt: iconPrompt
-        });
-      }
-
-    } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('401')) {
-        return res.status(401).json({ error: 'Invalid API key. Please check your GEMINI_API_KEY.' });
-      }
-      
-      if (error.message?.includes('QUOTA_EXCEEDED') || error.message?.includes('429') || error.message?.includes('quota')) {
-        return res.status(429).json({ 
-          error: 'API quota exceeded. You have used up your free tier limit.',
-          message: 'Please wait a few minutes and try again, or upgrade your API plan.',
-          retryAfter: '42 seconds'
-        });
-      }
-
-      return res.status(500).json({ 
-        error: 'Failed to generate icon', 
-        details: error.message || 'Unknown error'
-      });
-    }
-
-  } catch (error) {
-    return res.status(500).json({ 
-      error: 'An unexpected error occurred', 
-      details: error.message || 'Unknown error'
-    });
-  }
-});
-
-// Upgrade icon endpoint
-app.post('/api/upgrade-icon', async (req, res) => {
-  try {
-    const { image, upgradeLevel = 'medium', style = 'modern' } = req.body;
-    
-    if (!image) {
-      return res.status(400).json({ error: 'No image provided' });
-    }
-
-    // Save uploaded image for analysis
-    await saveUploadedImage(image, 'enhancement', {
-      upgradeLevel,
-      style,
-      type: 'icon-upgrade',
-      endpoint: '/api/upgrade-icon'
-    });
-
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env'
-      });
-    }
-
-    // Validate upgrade level and style
-    const validUpgradeLevel = iconUpgradeLevelPrompts[upgradeLevel] ? upgradeLevel : 'medium';
-    const validStyle = iconStylePrompts[style] ? style : 'modern';
-    const upgradeConfig = iconUpgradeLevelPrompts[validUpgradeLevel];
-    const styleConfig = iconStylePrompts[validStyle];
-
-    // Build the upgrade prompt
-    const upgradePrompt = `Upgrade and enhance this icon for professional web use. ${upgradeConfig.prompt} ${styleConfig.prompt} Maintain the core design and meaning while improving quality, clarity, and visual appeal. Make it suitable for modern web applications with scalable design.`;
-
-    // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
-
-    try {
-      // Determine MIME type from base64 string
-      let mimeType = "image/png";
-      if (image.includes('data:image/')) {
-        const mimeMatch = image.match(/data:image\/([^;]+)/);
-        if (mimeMatch) {
-          mimeType = `image/${mimeMatch[1]}`;
-        }
-      }
-      
-      const base64Data = image.split(',')[1] || image;
-      const result = await model.generateContent([
-        upgradePrompt,
-        { inlineData: { data: base64Data, mimeType } }
-      ]);
-
-      const response = await result.response;
-      
-      // Try to get image from response
-      let upgradedImageBase64 = null;
-      
-      if (response.candidates && response.candidates[0]) {
-        const parts = response.candidates[0].content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData?.data) {
-            upgradedImageBase64 = part.inlineData.data;
-            if (part.inlineData.mimeType) {
-              mimeType = part.inlineData.mimeType;
-            }
-            break;
-          }
-        }
-      }
-      
-      // If upgraded icon is returned, use it
-      if (upgradedImageBase64) {
-        return res.json({ 
-          upgradedIcon: `data:${mimeType};base64,${upgradedImageBase64}`,
-          message: `Icon upgraded successfully using ${validUpgradeLevel} level and ${validStyle} style.`,
-          upgradeLevel: validUpgradeLevel,
-          style: validStyle,
-          actualPrompt: upgradePrompt
-        });
-      } else {
-        // Return original image with analysis
-        const text = response.text();
-        return res.json({ 
-          upgradedIcon: image,
-          analysis: text,
-          message: `Icon processing attempted. Note: Gemini provides analysis. Original icon returned.`,
-          upgradeLevel: validUpgradeLevel,
-          style: validStyle,
-          actualPrompt: upgradePrompt
-        });
-      }
-
-    } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('401')) {
-        return res.status(401).json({ error: 'Invalid API key. Please check your GEMINI_API_KEY.' });
-      }
-      
-      if (error.message?.includes('QUOTA_EXCEEDED') || error.message?.includes('429') || error.message?.includes('quota')) {
-        return res.status(429).json({ 
-          error: 'API quota exceeded. You have used up your free tier limit.',
-          message: 'Please wait a few minutes and try again, or upgrade your API plan.',
-          retryAfter: '42 seconds'
-        });
-      }
-
-      return res.status(500).json({ 
-        error: 'Failed to upgrade icon', 
-        details: error.message || 'Unknown error'
-      });
-    }
-
-  } catch (error) {
-    return res.status(500).json({ 
-      error: 'An unexpected error occurred', 
-      details: error.message || 'Unknown error'
-    });
-  }
-});
-
-// Logo generation style prompts
-const logoStylePrompts = {
-  modern: {
-    prompt: 'Create a modern, professional logo with sleek design, contemporary aesthetics, and clean typography.',
-    description: "Contemporary design with clean lines"
-  },
-  classic: {
-    prompt: 'Create a classic, timeless logo with traditional design elements, elegant typography, and enduring appeal.',
-    description: "Traditional design with timeless elegance"
-  },
-  minimalist: {
-    prompt: 'Create a minimalist logo with simple shapes, minimal details, clean typography, and essential elements only.',
-    description: "Simple, clean, and essential elements"
-  },
-  bold: {
-    prompt: 'Create a bold, impactful logo with strong colors, thick strokes, powerful typography, and eye-catching design.',
-    description: "Strong visual presence with vibrant colors"
-  },
-  elegant: {
-    prompt: 'Create an elegant, sophisticated logo with refined design, graceful typography, and premium aesthetic.',
-    description: "Sophisticated and refined design"
-  },
-  playful: {
-    prompt: 'Create a playful, fun logo with whimsical elements, vibrant colors, and friendly typography.',
-    description: "Fun and engaging design"
-  },
-  corporate: {
-    prompt: 'Create a corporate, professional logo with business-oriented design, formal typography, and trustworthy appearance.',
-    description: "Professional business design"
-  },
-  creative: {
-    prompt: 'Create a creative, artistic logo with unique design elements, innovative typography, and expressive aesthetics.',
-    description: "Innovative and artistic design"
-  },
-  vintage: {
-    prompt: 'Create a vintage, retro logo with classic design elements, nostalgic typography, and old-school charm.',
-    description: "Retro and nostalgic design"
-  }
-};
-
-// Logo upgrade level prompts
-const logoUpgradeLevelPrompts = {
-  low: {
-    prompt: 'Apply subtle improvements: slightly enhance clarity, improve contrast, refine typography, and polish edges.',
-    description: "Minimal changes while preserving original design"
-  },
-  medium: {
-    prompt: 'Apply balanced improvements: enhance clarity and sharpness, improve colors and contrast, refine typography and details, optimize for professional use.',
-    description: "Moderate enhancements for better quality"
-  },
-  high: {
-    prompt: 'Apply maximum improvements: significantly enhance quality, optimize colors and contrast, perfect typography and edges, add professional polish, and create premium-grade logo.',
-    description: "Comprehensive upgrade for maximum quality"
-  }
-};
-
-// Generate logo endpoint
-app.post('/api/generate-logo', async (req, res) => {
-  try {
-    const { prompt, style = 'modern', size = '1024', companyName, tagline } = req.body;
-    
-    if (!prompt || !prompt.trim()) {
-      return res.status(400).json({ error: 'No prompt provided' });
-    }
-
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env'
-      });
-    }
-
-    // Validate style
-    const validStyle = logoStylePrompts[style] ? style : 'modern';
-    const styleConfig = logoStylePrompts[validStyle];
-
-    // Build the logo generation prompt
-    let logoPrompt = `Generate a high-quality professional logo for web and print use. ${styleConfig.prompt} The logo should represent: "${prompt}".`;
-    
-    if (companyName && companyName.trim()) {
-      logoPrompt += ` Include the company name "${companyName}" as part of the logo design.`;
-    }
-    
-    if (tagline && tagline.trim()) {
-      logoPrompt += ` Include the tagline "${tagline}" below the company name or logo symbol.`;
-    }
-    
-    logoPrompt += ` Make it suitable for use in modern branding, business cards, websites, and marketing materials. The logo should be professional, recognizable, scalable, and work well in both light and dark backgrounds. Size: ${size}x${size} pixels.`;
-
-    // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
-
-    try {
-      const result = await model.generateContent([logoPrompt]);
-      const response = await result.response;
-      
-      // Try to get image from response
-      let generatedImageBase64 = null;
-      let mimeType = "image/png";
-      
-      if (response.candidates && response.candidates[0]) {
-        const parts = response.candidates[0].content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData?.data) {
-            generatedImageBase64 = part.inlineData.data;
-            if (part.inlineData.mimeType) {
-              mimeType = part.inlineData.mimeType;
-            }
-            break;
-          }
-        }
-      }
-      
-      // If logo is generated, return it
-      if (generatedImageBase64) {
-        console.log('[Server] Returning logo with actualPrompt:', logoPrompt.substring(0, 100) + '...');
-        return res.json({ 
-          generatedLogo: `data:${mimeType};base64,${generatedImageBase64}`,
-          message: `Logo generated successfully using ${validStyle} style.`,
-          style: validStyle,
-          actualPrompt: logoPrompt
-        });
-      } else {
-        // Return error if no image generated
-        const text = response.text();
-        return res.json({ 
-          generatedLogo: null,
-          analysis: text,
-          message: `Logo generation attempted. Note: Gemini may provide text descriptions. Please refine your prompt.`,
-          style: validStyle,
-          actualPrompt: logoPrompt
-        });
-      }
-
-    } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('401')) {
-        return res.status(401).json({ 
-          error: 'Invalid API key. Please check your GEMINI_API_KEY.',
-          actualPrompt: logoPrompt
-        });
-      }
-      
-      if (error.message?.includes('QUOTA_EXCEEDED') || error.message?.includes('429') || error.message?.includes('quota')) {
-        return res.status(429).json({ 
-          error: 'API quota exceeded. You have used up your free tier limit.',
-          message: 'Please wait a few minutes and try again, or upgrade your API plan.',
-          retryAfter: '42 seconds',
-          actualPrompt: logoPrompt
-        });
-      }
-
-      return res.status(500).json({ 
-        error: 'Failed to generate logo', 
-        details: error.message || 'Unknown error',
-        actualPrompt: logoPrompt
-      });
-    }
-
-  } catch (error) {
-    // Try to get the prompt if it was created before the error
-    let promptToReturn = null;
-    try {
-      const { prompt, style = 'modern', size = '1024', companyName, tagline } = req.body;
-      if (prompt) {
-        const validStyle = logoStylePrompts[style] ? style : 'modern';
-        const styleConfig = logoStylePrompts[validStyle];
-        let logoPrompt = `Generate a high-quality professional logo for web and print use. ${styleConfig.prompt} The logo should represent: "${prompt}".`;
-        if (companyName && companyName.trim()) {
-          logoPrompt += ` Include the company name "${companyName}" as part of the logo design.`;
-        }
-        if (tagline && tagline.trim()) {
-          logoPrompt += ` Include the tagline "${tagline}" below the company name or logo symbol.`;
-        }
-        logoPrompt += ` Make it suitable for use in modern branding, business cards, websites, and marketing materials. The logo should be professional, recognizable, scalable, and work well in both light and dark backgrounds. Size: ${size}x${size} pixels.`;
-        promptToReturn = logoPrompt;
-      }
-    } catch (e) {
-      // Ignore errors in prompt reconstruction
-    }
-    
-    return res.status(500).json({ 
-      error: 'An unexpected error occurred', 
-      details: error.message || 'Unknown error',
-      actualPrompt: promptToReturn
-    });
-  }
-});
-
-// Upgrade logo endpoint
-app.post('/api/upgrade-logo', async (req, res) => {
-  try {
-    const { image, upgradeLevel = 'medium', style = 'modern' } = req.body;
-    
-    if (!image) {
-      return res.status(400).json({ error: 'No image provided' });
-    }
-
-    // Save uploaded image for analysis
-    await saveUploadedImage(image, 'enhancement', {
-      upgradeLevel,
-      style,
-      type: 'logo-upgrade',
-      endpoint: '/api/upgrade-logo'
-    });
-
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env'
-      });
-    }
-
-    // Validate upgrade level and style
-    const validUpgradeLevel = logoUpgradeLevelPrompts[upgradeLevel] ? upgradeLevel : 'medium';
-    const validStyle = logoStylePrompts[style] ? style : 'modern';
-    const upgradeConfig = logoUpgradeLevelPrompts[validUpgradeLevel];
-    const styleConfig = logoStylePrompts[validStyle];
-
-    // Build the upgrade prompt
-    const upgradePrompt = `Upgrade and enhance this logo for professional branding use. ${upgradeConfig.prompt} ${styleConfig.prompt} Maintain the core design, brand identity, and meaning while improving quality, clarity, typography, and visual appeal. Make it suitable for modern branding, business cards, websites, and marketing materials with scalable design.`;
-
-    // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
-
-    try {
-      // Determine MIME type from base64 string
-      let mimeType = "image/png";
-      if (image.includes('data:image/')) {
-        const mimeMatch = image.match(/data:image\/([^;]+)/);
-        if (mimeMatch) {
-          mimeType = `image/${mimeMatch[1]}`;
-        }
-      }
-      
-      const base64Data = image.split(',')[1] || image;
-      const result = await model.generateContent([
-        upgradePrompt,
-        { inlineData: { data: base64Data, mimeType } }
-      ]);
-
-      const response = await result.response;
-      
-      // Try to get image from response
-      let upgradedImageBase64 = null;
-      
-      if (response.candidates && response.candidates[0]) {
-        const parts = response.candidates[0].content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData?.data) {
-            upgradedImageBase64 = part.inlineData.data;
-            if (part.inlineData.mimeType) {
-              mimeType = part.inlineData.mimeType;
-            }
-            break;
-          }
-        }
-      }
-      
-      // If upgraded logo is returned, use it
-      if (upgradedImageBase64) {
-        return res.json({ 
-          upgradedLogo: `data:${mimeType};base64,${upgradedImageBase64}`,
-          message: `Logo upgraded successfully using ${validUpgradeLevel} level and ${validStyle} style.`,
-          upgradeLevel: validUpgradeLevel,
-          style: validStyle,
-          actualPrompt: upgradePrompt
-        });
-      } else {
-        // Return original image with analysis
-        const text = response.text();
-        return res.json({ 
-          upgradedLogo: image,
-          analysis: text,
-          message: `Logo processing attempted. Note: Gemini provides analysis. Original logo returned.`,
-          upgradeLevel: validUpgradeLevel,
-          style: validStyle,
-          actualPrompt: upgradePrompt
-        });
-      }
-
-    } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('401')) {
-        return res.status(401).json({ error: 'Invalid API key. Please check your GEMINI_API_KEY.' });
-      }
-      
-      if (error.message?.includes('QUOTA_EXCEEDED') || error.message?.includes('429') || error.message?.includes('quota')) {
-        return res.status(429).json({ 
-          error: 'API quota exceeded. You have used up your free tier limit.',
-          message: 'Please wait a few minutes and try again, or upgrade your API plan.',
-          retryAfter: '42 seconds'
-        });
-      }
-
-      return res.status(500).json({ 
-        error: 'Failed to upgrade logo', 
-        details: error.message || 'Unknown error'
+      console.error('AI API error:', error);
+      const aiError = classifyAiError(error);
+      return res.status(aiError.status).json({
+        error: aiError.message,
+        message: aiError.message,
+        details: aiError.details,
+        retryAfter: aiError.retryAfter,
       });
     }
 
@@ -1345,12 +750,9 @@ app.post('/api/detect-text', async (req, res) => {
       endpoint: '/api/detect-text'
     });
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env'
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      return res.status(configError.status).json(configError.body);
     }
 
     // Model selection: Use requested model or default to best text detection model
@@ -1414,7 +816,7 @@ IMPORTANT:
 - Order text blocks in reading order when possible`;
 
     // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const genAI = createGenerativeAI();
     // Note: getGenerativeModel doesn't validate the model until generateContent is called
     // So we'll handle model errors in the API call catch block
     const model = genAI.getGenerativeModel({ model: modelName });
@@ -1579,15 +981,12 @@ app.post('/api/translate-text', async (req, res) => {
       return res.status(400).json({ error: 'No texts provided' });
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env',
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      return res.status(configError.status).json(configError.body);
     }
 
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const genAI = createGenerativeAI();
     const translator = createTextTranslationService(genAI);
 
     try {
@@ -1657,12 +1056,9 @@ app.post('/api/translate-image', async (req, res) => {
       endpoint: '/api/translate-image'
     });
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_api_key_here') {
-      return res.status(500).json({ 
-        error: 'AI service not configured. Please set GEMINI_API_KEY in server/.env file',
-        instructions: 'Get your API key from https://aistudio.google.com/app/apikey and add it to server/.env'
-      });
+    const configError = validateAiConfig();
+    if (configError) {
+      return res.status(configError.status).json(configError.body);
     }
 
     // Language name mapping for better prompts
@@ -1793,8 +1189,8 @@ app.post('/api/translate-image', async (req, res) => {
     prompt += `OUTPUT: Return ONLY the translated image with all text translated to ${targetLangName}. The image should be visually identical to the original except for the translated text.`;
 
     // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
+    const genAI = createGenerativeAI();
+    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
 
     try {
       // Determine MIME type from base64 string
@@ -1862,23 +1258,13 @@ app.post('/api/translate-image', async (req, res) => {
       }
 
     } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('401')) {
-        return res.status(401).json({ error: 'Invalid API key. Please check your GEMINI_API_KEY.' });
-      }
-      
-      if (error.message?.includes('QUOTA_EXCEEDED') || error.message?.includes('429') || error.message?.includes('quota')) {
-        return res.status(429).json({ 
-          error: 'API quota exceeded. You have used up your free tier limit.',
-          message: 'Please wait a few minutes and try again, or upgrade your API plan.',
-          retryAfter: '42 seconds'
-        });
-      }
-
-      return res.status(500).json({ 
-        error: 'Failed to translate image', 
-        details: error.message || 'Unknown error'
+      console.error('AI API error:', error);
+      const aiError = classifyAiError(error);
+      return res.status(aiError.status).json({
+        error: aiError.message,
+        message: aiError.message,
+        details: aiError.details,
+        retryAfter: aiError.retryAfter,
       });
     }
 
@@ -1891,9 +1277,16 @@ app.post('/api/translate-image', async (req, res) => {
 });
 
 app.listen(PORT, () => {
+  const provider = resolveAiProvider();
   console.log(`🚀 Image Optimizer AI Backend running on http://localhost:${PORT}`);
-  console.log('📝 Make sure you have GEMINI_API_KEY set in server/.env file');
-  console.log('🔗 Get your API key from: https://aistudio.google.com/app/apikey');
+  console.log(`🤖 AI provider: ${provider}`);
+  if (provider === 'openrouter') {
+    console.log('📝 Set OPENROUTER_API_KEY (or GEMINI_API_KEY with OpenRouter key) in .env');
+    console.log('🔗 Get your API key from: https://openrouter.ai/keys');
+  } else {
+    console.log('📝 Set GEMINI_API_KEY in .env file');
+    console.log('🔗 Get your API key from: https://aistudio.google.com/app/apikey');
+  }
   console.log(`📸 Available enhancement modes: ${Object.keys(enhancementPrompts).join(', ')}`);
   console.log('🌍 Image translation feature enabled');
   console.log('');

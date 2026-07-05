@@ -1,6 +1,8 @@
 const MAX_ITEMS_PER_BATCH = 6;
 const MAX_CHARS_PER_BATCH = 1800;
 
+import { resolveAiProvider } from './ai-provider.js';
+
 export class TranslationServiceError extends Error {
   constructor(message, { statusCode = 500, details } = {}) {
     super(message);
@@ -165,8 +167,11 @@ const RETRYABLE_MODEL_MESSAGES = ['not found', 'unsupported', 'unknown model'];
 export const classifyGeminiError = (error) => {
   const message = error?.message || '';
 
-  if (error?.status === 401 || message.includes('API_KEY_INVALID') || message.includes('Permission')) {
-    return new TranslationServiceError('Invalid or unauthorized Gemini API key', { statusCode: 401, details: message });
+  const provider = resolveAiProvider();
+  const keyName = provider === 'openrouter' ? 'OpenRouter API key' : 'Gemini API key';
+
+  if (error?.status === 401 || message.includes('API_KEY_INVALID') || message.includes('Permission') || message.toLowerCase().includes('unauthorized')) {
+    return new TranslationServiceError(`Invalid or unauthorized ${keyName}`, { statusCode: 401, details: message });
   }
 
   if (error?.status === 429 || message.includes('429') || message.toLowerCase().includes('quota')) {

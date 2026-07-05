@@ -1,5 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
 // Enhancement mode prompts
 const enhancementPrompts = {
   document: {
