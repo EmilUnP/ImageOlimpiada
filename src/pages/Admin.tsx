@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trash2, Image as ImageIcon, Folder, X, Download } from "lucide-react";
 import { toast } from "sonner";
+import { getApiUrl } from "@/lib/api";
 
 interface ImageItem {
   filename: string;
@@ -15,24 +16,12 @@ interface ImageItem {
   stage?: string;
   targetLanguage?: string;
   type?: string;
-  [key: string]: any;
+  quality?: string;
+  [key: string]: unknown;
 }
 
-// Get API URL from environment or use default
-const getApiUrl = () => {
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
-  }
-  // In production, use relative URL; in development, use localhost
-  if (import.meta.env.PROD) {
-    return '';
-  }
-  return 'http://localhost:3001';
-};
-
-const API_URL = getApiUrl();
-
 export const Admin = () => {
+  const API_URL = getApiUrl();
   const [selectedFolder, setSelectedFolder] = useState<'enhancement' | 'translation'>('enhancement');
   const [enhancementImages, setEnhancementImages] = useState<ImageItem[]>([]);
   const [translationImages, setTranslationImages] = useState<ImageItem[]>([]);
@@ -43,8 +32,7 @@ export const Admin = () => {
   const loadImages = async (folderType: 'enhancement' | 'translation') => {
     setLoading(true);
     try {
-      // Use query parameter instead of path parameter for better compatibility
-      const response = await fetch(`${API_URL}/api/admin/images?folderType=${folderType}`);
+      const response = await fetch(`${API_URL}/api/admin/images/${folderType}`);
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Admin API error response:', errorText);
@@ -92,10 +80,10 @@ export const Admin = () => {
 
     setDeleting(filename);
     try {
-      // Use query parameters instead of path parameters
-      const response = await fetch(`${API_URL}/api/admin/images/delete?folderType=${folder}&filename=${encodeURIComponent(filename)}`, {
-        method: 'DELETE',
-      });
+      const response = await fetch(
+        `${API_URL}/api/admin/images/${folder}/${encodeURIComponent(filename)}`,
+        { method: 'DELETE' }
+      );
 
       if (!response.ok) {
         const errorText = await response.text();

@@ -37,32 +37,9 @@ export const FunctionSelector = ({ onFunctionSelect }: FunctionSelectorProps) =>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <ul className="space-y-2 text-sm">
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-primary text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Enhance photos, documents, and portraits</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-primary text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Multiple enhancement modes available</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-primary text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Adjustable intensity levels</span>
-              </li>
-            </ul>
-            <Button 
-              className="w-full"
-              onClick={() => onFunctionSelect('enhance')}
-            >
-              Use Image Quality Improver
+          <CardContent className="pt-0">
+            <Button className="w-full" onClick={() => onFunctionSelect('enhance')}>
+              Enhance Image
             </Button>
           </CardContent>
         </Card>
@@ -87,32 +64,9 @@ export const FunctionSelector = ({ onFunctionSelect }: FunctionSelectorProps) =>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <ul className="space-y-2 text-sm">
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center">
-                  <span className="text-accent text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Translate text in images to any language</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center">
-                  <span className="text-accent text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">Preserves original image quality</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center">
-                  <span className="text-accent text-xs font-bold">✓</span>
-                </div>
-                <span className="text-muted-foreground">AI-powered translation</span>
-              </li>
-            </ul>
-            <Button 
-              className="w-full"
-              onClick={() => onFunctionSelect('translate')}
-            >
-              Use Text Translation
+          <CardContent className="pt-0">
+            <Button className="w-full" onClick={() => onFunctionSelect('translate')}>
+              Translate Image
             </Button>
           </CardContent>
         </Card>

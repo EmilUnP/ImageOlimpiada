@@ -2,8 +2,7 @@ import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { translateImage, TranslateImageRequest, detectText, DetectTextRequest, translateText, TranslateTextRequest } from '@/lib/api';
 import { useImageUpload } from './useImageUpload';
-import { DetectedText } from '@/components/translation/TextDetectionPreview';
-import { TranslatedText } from '@/components/translation/TextTranslationPreview';
+import { DetectedText, TranslatedText } from '@/lib/types';
 
 export const useImageTranslation = () => {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -21,7 +20,7 @@ export const useImageTranslation = () => {
     try {
       const request: DetectTextRequest = {
         image: base64Image,
-        model: model, // Pass model if specified
+        model,
       };
 
       const data = await detectText(request);
@@ -29,18 +28,17 @@ export const useImageTranslation = () => {
       if (data?.detectedTexts && Array.isArray(data.detectedTexts)) {
         setDetectedTexts(data.detectedTexts);
         return data.detectedTexts;
-      } else {
-        // Fallback: create a mock detection result
-        const mockTexts: DetectedText[] = [
-          {
-            id: '1',
-            text: 'Text detected in image',
-            confidence: 0.75,
-          }
-        ];
-        setDetectedTexts(mockTexts);
-        return mockTexts;
       }
+
+      const mockTexts: DetectedText[] = [
+        {
+          id: '1',
+          text: 'Text detected in image',
+          confidence: 0.75,
+        },
+      ];
+      setDetectedTexts(mockTexts);
+      return mockTexts;
     } catch (error) {
       console.error('Text detection error:', error);
       toast.error("Failed to detect text. Proceeding with translation...");
@@ -55,59 +53,27 @@ export const useImageTranslation = () => {
     targetLanguage: string
   ): Promise<string[]> => {
     try {
-      console.log('useImageTranslation: Translating texts:', texts);
-      console.log('useImageTranslation: Target language:', targetLanguage);
-      console.log('useImageTranslation: Number of texts:', texts.length);
-      
       if (!texts || texts.length === 0) {
-        console.error('useImageTranslation: No texts to translate');
         toast.error("No texts provided for translation");
         return [];
       }
-      
-      const request: TranslateTextRequest = {
-        texts,
-        targetLanguage,
-      };
 
-      console.log('useImageTranslation: Sending request:', request);
+      const request: TranslateTextRequest = { texts, targetLanguage };
       const data = await translateText(request);
-      console.log('useImageTranslation: Full response:', data);
-      console.log('useImageTranslation: Translations array:', data?.translations);
-      console.log('useImageTranslation: Translations length:', data?.translations?.length);
 
       if (data?.translations && Array.isArray(data.translations)) {
-        // Filter out empty translations and log them
-        const validTranslations = data.translations.filter((t, i) => {
-          if (!t || t.trim().length === 0) {
-            console.warn(`useImageTranslation: Empty translation at index ${i} for text: "${texts[i]}"`);
-            return false;
-          }
-          return true;
-        });
-        
-        if (validTranslations.length > 0) {
-          console.log('useImageTranslation: Successfully received translations:', validTranslations);
-          // Return the same number of translations as input texts, filling empty ones
-          return texts.map((text, index) => data.translations[index] || "");
-        } else {
-          console.error('useImageTranslation: All translations are empty!', data.translations);
-          toast.error("Translation failed - all translations are empty");
-          return [];
+        const hasValid = data.translations.some((t) => t && t.trim().length > 0);
+        if (hasValid) {
+          return texts.map((_, index) => data.translations![index] || "");
         }
-      } else {
-        console.error('useImageTranslation: Invalid translation response:', data);
-        console.error('useImageTranslation: Response type:', typeof data);
-        console.error('useImageTranslation: Has translations?', !!data?.translations);
-        toast.error("Failed to get translations - invalid response format");
+        toast.error("Translation failed - all translations are empty");
         return [];
       }
+
+      toast.error("Failed to get translations - invalid response format");
+      return [];
     } catch (error) {
-      console.error('useImageTranslation: Translation error:', error);
-      if (error instanceof Error) {
-        console.error('useImageTranslation: Error message:', error.message);
-        console.error('useImageTranslation: Error stack:', error.stack);
-      }
+      console.error('Translation error:', error);
       const errorMessage = error instanceof Error ? error.message : "Failed to translate text";
       toast.error(`Translation error: ${errorMessage}`);
       return [];
@@ -129,7 +95,7 @@ export const useImageTranslation = () => {
     setIsProcessing(true);
     try {
       const textPairs = translatedTexts
-        ?.map(t => {
+        ?.map((t) => {
           const original = (t.text || "").trim();
           const translated = (t.translatedText || "").trim();
           const boundingBox = t.boundingBox
@@ -141,17 +107,10 @@ export const useImageTranslation = () => {
               }
             : undefined;
 
-          return {
-            original,
-            translated,
-            boundingBox,
-          };
+          return { original, translated, boundingBox };
         })
-        .filter(pair => pair.original.length > 0 && pair.translated.length > 0);
-      
-      console.log('Processing translation with text pairs:', textPairs);
-      console.log('Settings:', settings);
-      
+        .filter((pair) => pair.original.length > 0 && pair.translated.length > 0);
+
       const request: TranslateImageRequest = {
         image: base64Image,
         targetLanguage,
@@ -163,24 +122,17 @@ export const useImageTranslation = () => {
         enhanceReadability: settings?.enhanceReadability !== false,
       };
 
-      console.log('Sending translation request:', {
-        ...request,
-        image: request.image.substring(0, 50) + '...',
-        translatedTexts: request.translatedTexts,
-      });
-
       const data = await translateImage(request);
-      console.log('Translation response:', data);
 
       if (data?.translatedImage) {
         setTranslatedImage(data.translatedImage);
         const langName = data.targetLanguage || targetLanguage;
         toast.success(`Image text translated successfully to ${langName}!`);
         return data.translatedImage;
-      } else {
-        toast.error("No translated image received");
-        return null;
       }
+
+      toast.error("No translated image received");
+      return null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred. Make sure the backend server is running.";
       toast.error(errorMessage);
@@ -190,10 +142,7 @@ export const useImageTranslation = () => {
     }
   }, []);
 
-  const handleImageSelect = useCallback(async (
-    file: File,
-    targetLanguage: string
-  ) => {
+  const handleImageSelect = useCallback(async (file: File, targetLanguage: string) => {
     const base64Image = await fileToBase64(file);
     setOriginalImage(base64Image);
     setTranslatedImage(null);
@@ -223,4 +172,3 @@ export const useImageTranslation = () => {
     reset,
   };
 };
-

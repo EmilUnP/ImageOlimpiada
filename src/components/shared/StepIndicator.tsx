@@ -1,11 +1,16 @@
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface Step {
+export type StepStatus = "completed" | "current" | "upcoming";
+
+export interface Step {
   number: number;
   label: string;
-  status: "completed" | "current" | "upcoming";
+  status: StepStatus;
 }
+
+export const getStepStatus = (isCompleted: boolean, isCurrent: boolean): StepStatus =>
+  isCompleted ? "completed" : isCurrent ? "current" : "upcoming";
 
 interface StepIndicatorProps {
   steps: Step[];

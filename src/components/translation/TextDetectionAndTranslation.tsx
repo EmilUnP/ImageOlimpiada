@@ -6,22 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AlertCircle, CheckCircle2, Edit2, Save, X, Languages, ArrowRight, Loader2, Sparkles } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-
-export interface DetectedText {
-  id: string;
-  text: string;
-  confidence: number;
-  boundingBox?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-}
-
-export interface TranslatedText extends DetectedText {
-  translatedText: string;
-}
+import type { DetectedText, TranslatedText } from "@/lib/types";
 
 interface TextDetectionAndTranslationProps {
   image: string;
@@ -113,51 +98,33 @@ export const TextDetectionAndTranslation = ({
 
   const handleTranslate = async () => {
     if (originalTexts.length === 0) return;
-    
+
     try {
-      console.log('Starting translation for texts:', originalTexts.map(t => t.text));
       const translations = await onTranslate(originalTexts);
-      console.log('Received translations from onTranslate:', translations);
-      console.log('Translations type:', typeof translations, 'Is array:', Array.isArray(translations));
-      console.log('Translations length:', translations?.length);
-      
+
       if (translations && Array.isArray(translations) && translations.length > 0) {
-        // Check if translations is already TranslatedText[] or string[]
-        const isTranslatedTextArray = translations.length > 0 && typeof translations[0] === 'object' && 'translatedText' in translations[0];
-        
+        const isTranslatedTextArray = typeof translations[0] === 'object' && 'translatedText' in translations[0];
+
         let validTranslations: TranslatedText[];
         if (isTranslatedTextArray) {
-          // Already TranslatedText[]
           validTranslations = translations as TranslatedText[];
-          console.log('Using TranslatedText[] format');
         } else {
-          // It's string[], map to TranslatedText[]
-          console.log('Mapping string[] to TranslatedText[]');
           const translationsArray = translations as unknown as string[];
-          validTranslations = originalTexts.map((original, index) => {
-            const translation = translationsArray[index];
-            console.log(`Mapping ${index}: "${original.text}" -> "${translation}"`);
-            return {
-              ...original,
-              translatedText: translation || "",
-            };
-          });
+          validTranslations = originalTexts.map((original, index) => ({
+            ...original,
+            translatedText: translationsArray[index] || "",
+          }));
         }
-        
-        // Check if we have any actual translations (non-empty strings)
-        const hasValidTranslations = validTranslations.some(t => t.translatedText && t.translatedText.trim().length > 0);
-        
+
+        const hasValidTranslations = validTranslations.some(t => t.translatedText?.trim().length > 0);
         if (hasValidTranslations) {
-          console.log('Setting valid translations:', validTranslations);
           setTranslatedTexts(validTranslations);
           setHasTranslated(true);
         } else {
-          console.error('All translations are empty!', validTranslations);
           toast.error("Translation failed - received empty translations. Please try again.");
         }
       } else {
-        console.error('No translations received or empty array. Translations:', translations);
-        toast.error("Translation failed - no translations received. Please check the console for details.");
+        toast.error("Translation failed - no translations received.");
       }
     } catch (error) {
       console.error('Translation error:', error);
@@ -182,24 +149,16 @@ export const TextDetectionAndTranslation = ({
 
   const handleApply = () => {
     const validTranslations = translatedTexts.filter(
-      (text) => text.translatedText && text.translatedText.trim().length > 0
+      (text) => text.translatedText?.trim().length > 0
     );
-    
-    console.log('Applying translations:', validTranslations);
-    console.log('Original texts:', originalTexts);
-    
+
     if (validTranslations.length > 0) {
-      // Ensure we have both original and translated text for each
       const completeTranslations = validTranslations.map(t => ({
         ...t,
         text: t.text || originalTexts.find(ot => ot.id === t.id)?.text || "",
         translatedText: t.translatedText || "",
       }));
-      
-      console.log('Complete translations to apply:', completeTranslations);
       onApply(completeTranslations);
-    } else {
-      console.error('No valid translations to apply');
     }
   };
 

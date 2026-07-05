@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { FunctionSelector } from "@/components/shared/FunctionSelector";
 import { EnhancementWorkflow } from "@/components/enhancement/EnhancementWorkflow";
 import { TranslationWorkflow } from "@/components/translation/TranslationWorkflow";
-import { KeyboardShortcuts } from "@/components/shared/KeyboardShortcuts";
-import { Sparkles, Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 
 type AppFunction = 'enhance' | 'translate' | null;
 
@@ -52,34 +51,21 @@ const Index = () => {
       <div className="relative z-10 container mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12 lg:py-16">
         {/* Enhanced Header */}
         <header className="text-center mb-12 md:mb-20 space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex-1 hidden md:block" />
-            <div className="flex items-center justify-center gap-5 md:gap-7 flex-1">
-              <div className="relative group">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary to-accent rounded-3xl blur-2xl opacity-70 group-hover:opacity-100 animate-pulse-slow transition-opacity duration-500" />
-                <div className="relative p-5 md:p-6 rounded-3xl bg-gradient-to-br from-primary via-primary/95 to-accent shadow-glow transform transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-glow-accent">
-                  <ImageIcon className="w-8 h-8 md:w-10 md:h-10 text-primary-foreground relative z-10" />
-                  <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                </div>
+          <div className="flex items-center justify-center gap-5 md:gap-7 mb-8">
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-br from-primary to-accent rounded-3xl blur-2xl opacity-70 group-hover:opacity-100 animate-pulse-slow transition-opacity duration-500" />
+              <div className="relative p-5 md:p-6 rounded-3xl bg-gradient-to-br from-primary via-primary/95 to-accent shadow-glow transform transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-glow-accent">
+                <ImageIcon className="w-8 h-8 md:w-10 md:h-10 text-primary-foreground relative z-10" />
+                <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               </div>
-              <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold gradient-text tracking-tight leading-tight">
-                AI Image Optimizer
-              </h1>
             </div>
-            <div className="flex-1 flex justify-end hidden md:flex">
-              <KeyboardShortcuts />
-            </div>
+            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold gradient-text tracking-tight leading-tight">
+              AI Image Optimizer
+            </h1>
           </div>
           <p className="text-lg md:text-xl lg:text-2xl text-muted-foreground max-w-4xl mx-auto text-balance leading-relaxed px-4 font-light">
             Enhance image quality or translate text in images with AI-powered technology. Perfect for photos, documents, and multilingual content.
           </p>
-          <div className="flex items-center justify-center gap-3 text-sm md:text-base text-muted-foreground pt-4">
-            <div className="relative">
-              <Sparkles className="w-5 h-5 md:w-6 md:h-6 text-accent animate-pulse-slow relative z-10" />
-              <Sparkles className="w-5 h-5 md:w-6 md:h-6 text-primary absolute inset-0 opacity-60 animate-pulse-slow" style={{ animationDelay: '0.5s' }} />
-            </div>
-            <span className="font-semibold">Powered by Gemini AI</span>
-          </div>
         </header>
 
         {/* Enhanced Main Content */}

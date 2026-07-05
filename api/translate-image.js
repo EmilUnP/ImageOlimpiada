@@ -148,18 +148,12 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  console.log('translate-image: Request method:', req.method);
-  console.log('translate-image: Request URL:', req.url);
-  console.log('translate-image: Request headers:', JSON.stringify(req.headers));
-
   if (req.method === 'OPTIONS') {
-    console.log('translate-image: Handling OPTIONS request');
     res.status(200).end();
     return;
   }
 
   if (req.method !== 'POST') {
-    console.error('translate-image: Method not allowed:', req.method);
     res.status(405).json({
       error: 'Method not allowed',
       receivedMethod: req.method,
