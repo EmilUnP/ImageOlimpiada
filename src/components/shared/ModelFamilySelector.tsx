@@ -26,6 +26,11 @@ export const ModelFamilySelector = ({
         disabled={disabled}
         stacked={false}
       />
+      {value === "openai" && (
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          OCR & text via GPT-4o. Image enhance & translate via GPT Image (OpenRouter Image API).
+        </p>
+      )}
     </div>
   );
 };

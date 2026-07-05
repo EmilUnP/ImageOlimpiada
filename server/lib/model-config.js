@@ -10,7 +10,7 @@ const OPENROUTER_FAMILY_DEFAULTS = {
     vision: 'google/gemini-2.5-pro',
   },
   openai: {
-    image: 'openai/gpt-image-1',
+    image: 'openai/gpt-image-2',
     vision: 'openai/gpt-4o',
   },
 };
@@ -95,7 +95,24 @@ export const getOpenRouterImageModels = (family = 'gemini', explicitModel) => {
   const list = readEnvModel(familyEnvListKey(family, 'IMAGE'));
   if (list) return parseCommaList(list);
 
-  return [getOpenRouterImageModel(family)];
+  const models = [getOpenRouterImageModel(family)];
+
+  // Optional fallback if OpenAI Image API fails (set OPENROUTER_OPENAI_IMAGE_FALLBACK_TO_GEMINI=false to disable)
+  const allowGeminiFallback =
+    family === 'openai' && readEnvModel('OPENROUTER_OPENAI_IMAGE_FALLBACK_TO_GEMINI') !== 'false';
+  if (allowGeminiFallback) {
+    const geminiPrimary = getOpenRouterImageModel('gemini');
+    if (!models.includes(geminiPrimary)) models.push(geminiPrimary);
+
+    const geminiList = readEnvModel(familyEnvListKey('gemini', 'IMAGE'));
+    if (geminiList) {
+      for (const slug of parseCommaList(geminiList)) {
+        if (!models.includes(slug)) models.push(slug);
+      }
+    }
+  }
+
+  return models;
 };
 
 /** @param {ModelFamily} family */
@@ -109,10 +126,30 @@ export const getOpenRouterVisionModels = (family = 'gemini', explicitModel) => {
   return [primary];
 };
 
-/** OpenRouter slugs that return image output (Gemini image, Imagen, DALL·E, etc.) */
-export const isOpenRouterImageModel = (modelSlug) => {
+/**
+ * OpenAI GPT Image models use OpenRouter's dedicated Image API (POST /api/v1/images),
+ * not chat/completions modalities. Supports input_references for scan editing.
+ */
+export const usesOpenRouterDedicatedImageApi = (modelSlug) => {
   const slug = (modelSlug || '').toLowerCase();
-  return /image|imagen|dall-e|gpt-image|stable-diffusion|flux|midjourney/.test(slug);
+  if (!slug.startsWith('openai/')) return false;
+  return /gpt-image|gpt-5(\.\d+)?-image|gpt-5-image/.test(slug);
+};
+
+/** OpenRouter slugs that return image output via chat/completions (Gemini image, Imagen, etc.) */
+export const isOpenRouterImageModel = (modelSlug) => {
+  if (usesOpenRouterDedicatedImageApi(modelSlug)) return false;
+  const slug = (modelSlug || '').toLowerCase();
+  return /image|imagen|dall-e|stable-diffusion|flux|midjourney/.test(slug);
+};
+
+/** Modalities OpenRouter accepts per model — dall-e/imagen via chat API only */
+export const getOpenRouterImageModalities = (modelSlug) => {
+  if (usesOpenRouterDedicatedImageApi(modelSlug)) return null;
+  const slug = (modelSlug || '').toLowerCase();
+  if (/dall-e|imagen/.test(slug)) return ['image'];
+  if (isOpenRouterImageModel(modelSlug)) return ['image', 'text'];
+  return null;
 };
 
 /** OCR / text tasks — lower cap so small OpenRouter balances can afford the request */

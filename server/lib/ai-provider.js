@@ -11,6 +11,8 @@ import {
   getPublicAiConfig,
   logOpenRouterModelConfig,
   getOpenRouterVisionMaxTokens,
+  getOpenRouterImageModalities,
+  usesOpenRouterDedicatedImageApi,
 } from './model-config.js';
 
 export {
@@ -23,9 +25,12 @@ export {
   isOpenRouterImageModel,
   getPublicAiConfig,
   getOpenRouterVisionMaxTokens,
+  getOpenRouterImageModalities,
+  usesOpenRouterDedicatedImageApi,
 } from './model-config.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_IMAGES_API_URL = 'https://openrouter.ai/api/v1/images';
 
 /**
  * Google AI Studio — image IN + image OUT (enhance / translate image).
@@ -179,7 +184,9 @@ const getImageModelsForProvider = (provider, explicitModel, modelFamily = 'gemin
 
 export const isModelNotFoundError = (error) =>
   error?.status === 404 ||
-  /not found for API|not supported for generateContent|is not found/i.test(error?.message || '');
+  /not found for API|not supported for generateContent|is not found|no endpoints found|output modalities/i.test(
+    error?.message || ''
+  );
 
 export const resolveAiProvider = () => {
   const explicit = process.env.AI_PROVIDER?.toLowerCase();
@@ -340,14 +347,87 @@ const buildGeminiLikeResponse = (openRouterData) => {
   };
 };
 
+const buildGeminiLikeResponseFromImageApi = (imageApiData) => {
+  const item = imageApiData?.data?.[0];
+  const b64 = item?.b64_json;
+  const mimeType = item?.media_type || 'image/png';
+  const parts = b64 ? [{ inlineData: { mimeType, data: b64 } }] : [{ text: '' }];
+
+  return {
+    text: () => '',
+    candidates: [{ content: { parts } }],
+  };
+};
+
+const openRouterHeaders = (apiKey) => ({
+  Authorization: `Bearer ${apiKey}`,
+  'Content-Type': 'application/json',
+  'HTTP-Referer': process.env.APP_URL || 'http://localhost:5173',
+  'X-Title': 'Vision AI',
+});
+
 class OpenRouterModel {
   constructor(apiKey, modelName) {
     this.apiKey = apiKey;
     this.modelName = toOpenRouterModel(modelName);
   }
 
+  async generateViaImageApi(prompt, imageData, mimeType) {
+    const body = {
+      model: this.modelName,
+      prompt,
+      quality: 'high',
+      output_format: 'png',
+      input_references: [
+        {
+          type: 'image_url',
+          image_url: { url: `data:${mimeType};base64,${imageData}` },
+        },
+      ],
+    };
+
+    console.log(`[ai-provider] OpenRouter Image API → ${this.modelName} (with reference image)`);
+
+    const response = await fetch(OPENROUTER_IMAGES_API_URL, {
+      method: 'POST',
+      headers: openRouterHeaders(this.apiKey),
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errMsg = data?.error?.message || data?.message || `OpenRouter Image API error: ${response.status}`;
+      const error = new Error(errMsg);
+      error.status = response.status;
+      throw error;
+    }
+
+    if (!data?.data?.[0]?.b64_json) {
+      const error = new Error('OpenRouter Image API returned no image data');
+      error.status = 502;
+      throw error;
+    }
+
+    return {
+      response: Promise.resolve(buildGeminiLikeResponseFromImageApi(data)),
+    };
+  }
+
   async generateContent(parts, options = {}) {
     const { text, imageData, mimeType } = parseGeminiParts(parts);
+
+    if (usesOpenRouterDedicatedImageApi(this.modelName)) {
+      if (!imageData) {
+        const error = new Error(
+          `${this.modelName} requires a reference image. Use the OpenRouter Image API with input_references.`
+        );
+        error.status = 400;
+        throw error;
+      }
+      return this.generateViaImageApi(text, imageData, mimeType);
+    }
+
     const content = [{ type: 'text', text }];
 
     if (imageData) {
@@ -369,8 +449,9 @@ class OpenRouterModel {
       if (maxOutputTokens !== undefined) body.max_tokens = maxOutputTokens;
     }
 
-    if (isOpenRouterImageModel(this.modelName)) {
-      body.modalities = ['image', 'text'];
+    const modalities = getOpenRouterImageModalities(this.modelName);
+    if (modalities) {
+      body.modalities = modalities;
       if (body.max_tokens === undefined) {
         body.max_tokens = OPENROUTER_IMAGE_MAX_TOKENS;
       }
@@ -380,12 +461,7 @@ class OpenRouterModel {
 
     const response = await fetch(OPENROUTER_API_URL, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.APP_URL || 'http://localhost:5173',
-        'X-Title': 'Vision AI',
-      },
+      headers: openRouterHeaders(this.apiKey),
       body: JSON.stringify(body),
     });
 
@@ -557,7 +633,9 @@ export const classifyAiError = (error) => {
       message:
         provider === 'gemini'
           ? `Image model not available. Set GEMINI_IMAGE_MODEL=gemini-2.5-flash-image in .env (see ListModels for your account).`
-          : 'Image model not available. Check IMAGE_MODEL in .env or OpenRouter model list.',
+          : /output modalities/i.test(message)
+            ? 'This model needs the OpenRouter Image API. Set OPENROUTER_OPENAI_IMAGE_MODEL=openai/gpt-image-2 for OpenAI image editing.'
+            : 'Image model not available on OpenRouter. Check OPENROUTER_GEMINI_IMAGE_MODEL or OPENROUTER_OPENAI_IMAGE_MODEL in .env.',
       details: message,
     };
   }

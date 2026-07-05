@@ -1,7 +1,7 @@
 const MAX_ITEMS_PER_BATCH = 6;
 const MAX_CHARS_PER_BATCH = 1800;
 
-import { resolveAiProvider, getPreferredVisionModels } from './ai-provider.js';
+import { resolveAiProvider, getPreferredVisionModels, getOpenRouterVisionModel } from './ai-provider.js';
 import { buildAcademicTextTranslationPrompt } from './textbook-prompts.js';
 
 export class TranslationServiceError extends Error {
@@ -208,8 +208,12 @@ export const performTranslations = async ({ genAI, items, targetLanguageName, mo
     maxOutputTokens: 2048,
   };
 
-  const preferredModels = getPreferredVisionModels(modelFamily);
-  const configuredModel = process.env.GEMINI_VISION_MODEL?.trim();
+  const family = modelFamily || 'gemini';
+  const preferredModels = getPreferredVisionModels(family);
+  const configuredModel =
+    resolveAiProvider() === 'openrouter'
+      ? getOpenRouterVisionModel(family)
+      : process.env.GEMINI_VISION_MODEL?.trim();
 
   let lastError;
 
@@ -224,11 +228,11 @@ export const performTranslations = async ({ genAI, items, targetLanguageName, mo
       continue;
     }
 
-    console.info(`[translate-text] Using Gemini model "${modelName}" for translation.`);
+    console.info(`[translate-text] Using model "${modelName}" (${family}) for translation.`);
 
     if (configuredModel && modelName !== configuredModel) {
       console.warn(
-        `[translate-text] ⚠️  Fell back from configured GEMINI_VISION_MODEL="${configuredModel}" to "${modelName}"`
+        `[translate-text] ⚠️  Fell back from configured vision model "${configuredModel}" to "${modelName}"`
       );
     }
 
