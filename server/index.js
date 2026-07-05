@@ -29,6 +29,7 @@ import {
   classifyGeminiError,
 } from './lib/text-translation.js';
 import { renderTranslatedImage } from './lib/translate-image-render.js';
+import { getLanguageName, normaliseTextPairs } from './lib/normalise-text-pairs.js';
 import { enhancementPrompts, getEnhancementModesList, buildEnhancementPrompt } from './lib/enhancement-modes.js';
 import { TEXTBOOK_OCR_PROMPT } from './lib/textbook-prompts.js';
 
@@ -884,10 +885,6 @@ app.post('/api/translate-image', async (req, res) => {
       translatedTexts: translatedTextPairs,
       correctedTexts,
       quality = 'premium',
-      fontMatching = 'auto',
-      textStyle = 'adaptive',
-      preserveFormatting = true,
-      enhanceReadability = true
     } = req.body;
     
     if (!image) {
@@ -898,10 +895,6 @@ app.post('/api/translate-image', async (req, res) => {
     await saveUploadedImage(image, 'translation', {
       targetLanguage,
       quality,
-      fontMatching,
-      textStyle,
-      preserveFormatting,
-      enhanceReadability,
       translatedTextsCount: translatedTextPairs ? translatedTextPairs.length : 0,
       type: 'translation',
       stage: 'image-translation',
@@ -913,22 +906,8 @@ app.post('/api/translate-image', async (req, res) => {
       return res.status(configError.status).json(configError.body);
     }
 
-    // Language name mapping for better prompts
-    const languageNames = {
-      en: 'English',
-      ru: 'Russian',
-      az: 'Azerbaijani',
-    };
-
-    const targetLangName = languageNames[targetLanguage] || targetLanguage;
-
-    const textPairs = (translatedTextPairs || [])
-      .map((pair) => ({
-        original: typeof pair.original === 'string' ? pair.original.trim() : '',
-        translated: typeof pair.translated === 'string' ? pair.translated.trim() : '',
-        boundingBox: pair.boundingBox,
-      }))
-      .filter((pair) => pair.original && pair.translated);
+    const targetLangName = getLanguageName(targetLanguage);
+    const textPairs = normaliseTextPairs(translatedTextPairs);
 
     try {
       const result = await renderTranslatedImage({
@@ -937,12 +916,15 @@ app.post('/api/translate-image', async (req, res) => {
         targetLanguage,
         targetLangName,
         quality,
-        fontMatching,
-        textStyle,
-        preserveFormatting,
-        enhanceReadability,
         correctedTexts,
       });
+
+      if (result.method !== 'ai-image' || !result.translatedImage) {
+        return res.status(422).json({
+          error: result.message || 'Could not replace text on image',
+          method: result.method,
+        });
+      }
 
       return res.json({
         translatedImage: result.translatedImage,
@@ -950,9 +932,6 @@ app.post('/api/translate-image', async (req, res) => {
         targetLanguage: targetLangName,
         method: result.method,
         appliedCount: result.appliedCount,
-        skippedCount: result.skippedCount,
-        analysis: result.analysis,
-        fallback: false,
       });
     } catch (error) {
       console.error('AI API error:', error);

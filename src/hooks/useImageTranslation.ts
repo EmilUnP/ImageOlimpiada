@@ -30,15 +30,8 @@ export const useImageTranslation = () => {
         return data.detectedTexts;
       }
 
-      const mockTexts: DetectedText[] = [
-        {
-          id: '1',
-          text: 'Text detected in image',
-          confidence: 0.75,
-        },
-      ];
-      setDetectedTexts(mockTexts);
-      return mockTexts;
+      toast.error("No text detected in the image");
+      return [];
     } catch (error) {
       console.error('Text detection error:', error);
       toast.error("Failed to detect text. Proceeding with translation...");
@@ -84,58 +77,39 @@ export const useImageTranslation = () => {
     base64Image: string,
     targetLanguage: string,
     translatedTexts?: TranslatedText[],
-    settings?: {
-      quality?: "standard" | "premium" | "ultra";
-      fontMatching?: "auto" | "preserve" | "native";
-      textStyle?: "exact" | "natural" | "adaptive";
-      preserveFormatting?: boolean;
-      enhanceReadability?: boolean;
-    }
+    settings?: { quality?: "standard" | "premium" | "ultra" }
   ) => {
     setIsProcessing(true);
     try {
       const textPairs = translatedTexts
-        ?.map((t) => {
-          const original = (t.text || "").trim();
-          const translated = (t.translatedText || "").trim();
-          const boundingBox = t.boundingBox
-            ? {
-                x: t.boundingBox.x,
-                y: t.boundingBox.y,
-                width: t.boundingBox.width,
-                height: t.boundingBox.height,
-              }
-            : undefined;
-
-          return { original, translated, boundingBox };
-        })
+        ?.map((t) => ({
+          original: (t.text || "").trim(),
+          translated: (t.translatedText || "").trim(),
+        }))
         .filter((pair) => pair.original.length > 0 && pair.translated.length > 0);
+
+      if (!textPairs?.length) {
+        toast.error("No translated text to apply");
+        return null;
+      }
 
       const request: TranslateImageRequest = {
         image: base64Image,
         targetLanguage,
-        translatedTexts: textPairs && textPairs.length > 0 ? textPairs : undefined,
+        translatedTexts: textPairs,
         quality: settings?.quality || "premium",
-        fontMatching: settings?.fontMatching || "auto",
-        textStyle: settings?.textStyle || "adaptive",
-        preserveFormatting: settings?.preserveFormatting !== false,
-        enhanceReadability: settings?.enhanceReadability !== false,
       };
 
       const data = await translateImage(request);
 
-      if (data?.translatedImage) {
+      if (data?.method === 'ai-image' && data?.translatedImage) {
         setTranslatedImage(data.translatedImage);
         const langName = data.targetLanguage || targetLanguage;
-        if (data.method === 'ai-image') {
-          toast.success(`Text replaced on image (${langName})`);
-        } else {
-          toast.error(data.message || 'Could not replace text on image');
-        }
+        toast.success(`Text replaced on image (${langName})`);
         return data.translatedImage;
       }
 
-      toast.error("No translated image received");
+      toast.error(data?.message || "Could not replace text on image");
       return null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred. Make sure the backend server is running.";

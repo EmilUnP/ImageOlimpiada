@@ -112,6 +112,10 @@ STRICT RULES:
     });
   }
 
+  if (/azerbaijani/i.test(targetLangName)) {
+    prompt += `\nFor Azerbaijani use correct characters: ı, ş, ə, ü, ö, ç, ğ, İ, Ş, Ə — never mix Cyrillic and Latin.\n`;
+  }
+
   prompt += `\nReturn ONLY the edited image.`;
 
   return prompt;

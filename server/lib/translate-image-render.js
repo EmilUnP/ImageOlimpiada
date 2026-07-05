@@ -43,7 +43,7 @@ export async function renderTranslatedImage({
 
   if (!hasPairs && !hasCorrected) {
     return {
-      translatedImage: image,
+      translatedImage: null,
       method: 'none',
       message: 'No translated text provided. Run OCR and translation first.',
     };
@@ -54,7 +54,7 @@ export async function renderTranslatedImage({
 
   if (!data) {
     return {
-      translatedImage: image,
+      translatedImage: null,
       method: 'none',
       message: 'Invalid image data.',
     };
@@ -83,7 +83,7 @@ export async function renderTranslatedImage({
   if (!translatedImage) {
     console.warn('[translate-image] Model returned no image output');
     return {
-      translatedImage: image,
+      translatedImage: null,
       method: 'none',
       message: 'Image model did not return an edited image. Try again or check GEMINI_IMAGE_MODEL in .env.',
     };

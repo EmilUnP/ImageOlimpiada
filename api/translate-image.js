@@ -2,37 +2,7 @@ import '../server/load-env.js';
 import { validateAiConfig, classifyAiError } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { renderTranslatedImage } from '../server/lib/translate-image-render.js';
-
-const LANGUAGE_NAMES = {
-  en: 'English',
-  ru: 'Russian',
-  az: 'Azerbaijani',
-};
-
-const normaliseTextPairs = (translatedTexts = []) => {
-  if (!Array.isArray(translatedTexts) || translatedTexts.length === 0) return [];
-  return translatedTexts
-    .map((pair) => {
-      const original = typeof pair.original === 'string' ? pair.original.trim() : '';
-      const translated = typeof pair.translated === 'string' ? pair.translated.trim() : '';
-      const boundingBox =
-        pair.boundingBox &&
-        typeof pair.boundingBox === 'object' &&
-        ['x', 'y', 'width', 'height'].every((key) => typeof pair.boundingBox[key] === 'number')
-          ? {
-              x: pair.boundingBox.x,
-              y: pair.boundingBox.y,
-              width: pair.boundingBox.width,
-              height: pair.boundingBox.height,
-            }
-          : undefined;
-
-      if (!original || !translated) return null;
-
-      return { original, translated, boundingBox };
-    })
-    .filter(Boolean);
-};
+import { getLanguageName, normaliseTextPairs } from '../server/lib/normalise-text-pairs.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -61,10 +31,6 @@ export default async function handler(req, res) {
       translatedTexts,
       correctedTexts,
       quality = 'premium',
-      fontMatching = 'auto',
-      textStyle = 'adaptive',
-      preserveFormatting = true,
-      enhanceReadability = true,
     } = req.body ?? {};
 
     if (!image || typeof image !== 'string') {
@@ -73,16 +39,12 @@ export default async function handler(req, res) {
     }
 
     const textPairs = normaliseTextPairs(translatedTexts);
-    const targetLangName = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
+    const targetLangName = getLanguageName(targetLanguage);
 
     try {
       await saveUploadedImage(image, 'translation', {
         targetLanguage,
         quality,
-        fontMatching,
-        textStyle,
-        preserveFormatting,
-        enhanceReadability,
         translatedTextsCount: textPairs.length,
         type: 'translation',
         stage: 'image-translation',
@@ -101,7 +63,6 @@ export default async function handler(req, res) {
     console.log('translate-image: Prepared translation request', {
       targetLanguage: targetLangName,
       textPairs: textPairs.length,
-      withBoxes: textPairs.filter((p) => p.boundingBox).length,
       quality,
     });
 
@@ -112,12 +73,16 @@ export default async function handler(req, res) {
         targetLanguage,
         targetLangName,
         quality,
-        fontMatching,
-        textStyle,
-        preserveFormatting,
-        enhanceReadability,
         correctedTexts,
       });
+
+      if (result.method !== 'ai-image' || !result.translatedImage) {
+        res.status(422).json({
+          error: result.message || 'Could not replace text on image',
+          method: result.method,
+        });
+        return;
+      }
 
       res.json({
         translatedImage: result.translatedImage,
@@ -125,9 +90,6 @@ export default async function handler(req, res) {
         targetLanguage: targetLangName,
         method: result.method,
         appliedCount: result.appliedCount,
-        skippedCount: result.skippedCount,
-        analysis: result.analysis,
-        fallback: false,
       });
     } catch (error) {
       console.error('translate-image: AI API error:', error);

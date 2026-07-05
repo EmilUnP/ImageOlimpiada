@@ -16,10 +16,6 @@ import { toast } from "sonner";
 
 const DEFAULT_TRANSLATION_SETTINGS = {
   quality: "premium" as const,
-  fontMatching: "auto" as const,
-  textStyle: "adaptive" as const,
-  preserveFormatting: true,
-  enhanceReadability: true,
 };
 
 export const TranslationWorkflow = () => {

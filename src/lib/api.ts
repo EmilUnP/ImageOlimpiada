@@ -44,19 +44,9 @@ export interface TranslateImageRequest {
   translatedTexts?: Array<{
     original: string;
     translated: string;
-    boundingBox?: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
   }>;
   correctedTexts?: string[];
   quality?: "standard" | "premium" | "ultra";
-  fontMatching?: "auto" | "preserve" | "native";
-  textStyle?: "exact" | "natural" | "adaptive";
-  preserveFormatting?: boolean;
-  enhanceReadability?: boolean;
 }
 
 export interface TranslateImageResponse {
