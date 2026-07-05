@@ -1,6 +1,6 @@
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
-import { enhancementPrompts } from '../server/lib/enhancement-modes.js';
+import { enhancementPrompts, buildEnhancementPrompt } from '../server/lib/enhancement-modes.js';
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { image, mode = 'photo', intensity = 'medium' } = req.body;
+    const { image, mode = 'textbook', intensity = 'medium' } = req.body;
     
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
@@ -45,19 +45,7 @@ export default async function handler(req, res) {
 
     // Validate mode
     const validMode = enhancementPrompts[mode] ? mode : 'photo';
-    const enhancementConfig = enhancementPrompts[validMode];
-
-    // Adjust prompt based on intensity
-    let intensityModifier = '';
-    if (intensity === 'low') {
-      intensityModifier = ' Apply subtle enhancements only.';
-    } else if (intensity === 'high') {
-      intensityModifier = ' Apply aggressive enhancements for maximum quality improvement.';
-    } else {
-      intensityModifier = ' Apply balanced, moderate enhancements.';
-    }
-
-    const prompt = enhancementConfig.prompt + intensityModifier;
+    const prompt = buildEnhancementPrompt(validMode, intensity);
 
     const genAI = createGenerativeAI();
     const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });

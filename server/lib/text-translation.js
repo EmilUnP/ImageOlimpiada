@@ -2,6 +2,7 @@ const MAX_ITEMS_PER_BATCH = 6;
 const MAX_CHARS_PER_BATCH = 1800;
 
 import { resolveAiProvider } from './ai-provider.js';
+import { buildAcademicTextTranslationPrompt } from './textbook-prompts.js';
 
 export class TranslationServiceError extends Error {
   constructor(message, { statusCode = 500, details } = {}) {
@@ -14,18 +15,7 @@ export class TranslationServiceError extends Error {
 export const languageNames = {
   en: 'English',
   ru: 'Russian',
-  tr: 'Turkish',
-  uk: 'Ukrainian',
-  es: 'Spanish',
-  fr: 'French',
-  de: 'German',
-  it: 'Italian',
-  pt: 'Portuguese',
-  zh: 'Chinese',
-  ja: 'Japanese',
-  ko: 'Korean',
-  ar: 'Arabic',
-  hi: 'Hindi',
+  az: 'Azerbaijani',
 };
 
 export const getLanguageName = (code) => languageNames[code] || code;
@@ -78,25 +68,8 @@ const escapeForPrompt = (text) => {
     .trim();
 };
 
-const buildPrompt = (items, targetLanguageName) => {
-  const instructions = items
-    .map((item, idx) => `${idx + 1}. "${escapeForPrompt(item.text)}"`)
-    .join('\n');
-
-  return `You are a professional translator. Translate the following texts to ${targetLanguageName}.
-
-CRITICAL REQUIREMENTS:
-1. Return ONLY a valid JSON array
-2. Maintain the exact same order as the input texts
-3. Translate each text accurately and completely
-4. Do not add explanations, comments, or markdown
-
-Texts:
-${instructions}
-
-Return ONLY this format (JSON array):
-["translation1", "translation2", "..."]`;
-};
+const buildPrompt = (items, targetLanguageName) =>
+  buildAcademicTextTranslationPrompt(items, targetLanguageName);
 
 const extractArrayFromResponse = (raw) => {
   const codeBlockMatch = raw.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);

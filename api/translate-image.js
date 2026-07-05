@@ -1,42 +1,12 @@
 import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { applyTextOverlaysToImage } from '../server/lib/local-image-translation.js';
+import { buildTextbookImageTranslationPrompt } from '../server/lib/textbook-prompts.js';
 
 const LANGUAGE_NAMES = {
   en: 'English',
   ru: 'Russian',
-  tr: 'Turkish',
-  uk: 'Ukrainian',
-  es: 'Spanish',
-  fr: 'French',
-  de: 'German',
-  it: 'Italian',
-  pt: 'Portuguese',
-  zh: 'Chinese',
-  ja: 'Japanese',
-  ko: 'Korean',
-  ar: 'Arabic',
-  hi: 'Hindi',
-};
-
-const QUALITY_INSTRUCTIONS = {
-  standard: 'Provide accurate translation with good text rendering.',
-  premium:
-    'Provide highly accurate translation with excellent text rendering, precise font matching, and perfect positioning. Pay extra attention to details.',
-  ultra:
-    'Provide perfect translation with pixel-perfect text rendering, exact font matching, perfect positioning, and flawless visual integration. Maximum attention to every detail.',
-};
-
-const FONT_INSTRUCTIONS = {
-  auto: 'Intelligently match fonts that are visually similar to the original, considering the target language typography.',
-  preserve: 'Preserve the exact original fonts as much as possible while adapting characters to the target language.',
-  native: 'Use fonts native to the target language while maintaining visual harmony with the original design.',
-};
-
-const STYLE_INSTRUCTIONS = {
-  exact: 'Preserve the exact original text style, formatting, and visual appearance.',
-  natural: 'Adapt the text style to be natural and readable in the target language while maintaining visual coherence.',
-  adaptive: 'Balance between preserving original style and adapting to target language conventions for optimal readability.',
+  az: 'Azerbaijani',
 };
 
 const extractMimeType = (base64Image, fallback = 'image/jpeg') => {
@@ -78,68 +48,6 @@ const normaliseTextPairs = (translatedTexts = []) => {
       };
     })
     .filter(Boolean);
-};
-
-const buildPrompt = ({
-  textPairs,
-  correctedTexts,
-  targetLangName,
-  quality,
-  fontMatching,
-  textStyle,
-  preserveFormatting,
-  enhanceReadability,
-}) => {
-  let prompt = `You are an expert image translation specialist. Replace ALL text in this image with professional-quality translations.\n\n`;
-
-  if (textPairs.length > 0) {
-    prompt += `CRITICAL INSTRUCTIONS – FOLLOW EXACTLY:\n`;
-    prompt += `You MUST find and replace each of the following text pairs in the image:\n\n`;
-
-    textPairs.forEach((pair, index) => {
-      prompt += `${index + 1}. Find the text: "${pair.original}"\n`;
-      prompt += `   Replace with: "${pair.translated}"\n`;
-      if (pair.boundingBox) {
-        prompt += `   Approximate bounding box: x=${Math.round(pair.boundingBox.x)}, y=${Math.round(pair.boundingBox.y)}, width=${Math.round(pair.boundingBox.width)}, height=${Math.round(pair.boundingBox.height)}\n`;
-      }
-      prompt += `   Maintain identical position, size, font, color, style, and visual effects.\n\n`;
-    });
-
-    prompt += `ABSOLUTE RULES:\n`;
-    prompt += `- Replace ONLY the listed text entries. Do NOT translate any other content.\n`;
-    prompt += `- Use the translations exactly as provided without alterations.\n`;
-    prompt += `- Preserve the overall design, colors, and non-text elements exactly.\n\n`;
-  } else if (Array.isArray(correctedTexts) && correctedTexts.length > 0) {
-    prompt += `The user has verified the following text blocks. Translate each one to ${targetLangName} and replace it in the image:\n`;
-    correctedTexts.forEach((text, index) => {
-      prompt += `${index + 1}. "${text}"\n`;
-    });
-    prompt += `\nEnsure accurate translation while preserving text positioning and style.\n\n`;
-  } else {
-    prompt += `Detect EVERY piece of text in the image and translate it to ${targetLangName}. Preserve layout, style, and formatting exactly.\n\n`;
-  }
-
-  prompt += `VISUAL & QUALITY REQUIREMENTS (${quality.toUpperCase()} quality):\n`;
-  prompt += `- ${QUALITY_INSTRUCTIONS[quality] || QUALITY_INSTRUCTIONS.premium}\n`;
-  prompt += `- ${FONT_INSTRUCTIONS[fontMatching] || FONT_INSTRUCTIONS.auto}\n`;
-  prompt += `- ${STYLE_INSTRUCTIONS[textStyle] || STYLE_INSTRUCTIONS.adaptive}\n`;
-  if (preserveFormatting) {
-    prompt += `- Preserve ALL formatting: bold, italic, underline, color, shadows, gradients, outlines.\n`;
-  }
-  if (enhanceReadability) {
-    prompt += `- Ensure translated text is perfectly legible in ${targetLangName}, with optimal spacing and line breaks.\n`;
-  }
-  prompt += `- Maintain exact alignment, spacing, text hierarchy, and proportions.\n`;
-  prompt += `- Keep the background, images, and non-text design elements untouched.\n\n`;
-
-  prompt += `TECHNICAL OUTPUT REQUIREMENTS:\n`;
-  prompt += `- Output must be a high-resolution image matching the original dimensions and quality.\n`;
-  prompt += `- The only change should be the translated text. Everything else must remain identical.\n`;
-  prompt += `- The final result should look as if it were originally created in ${targetLangName}.\n\n`;
-
-  prompt += `OUTPUT: Return ONLY the translated image with all text localized to ${targetLangName}.`;
-
-  return prompt;
 };
 
 export default async function handler(req, res) {
@@ -206,7 +114,7 @@ export default async function handler(req, res) {
     }
 
     const targetLangName = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
-    const prompt = buildPrompt({
+    const prompt = buildTextbookImageTranslationPrompt({
       textPairs,
       correctedTexts,
       targetLangName,

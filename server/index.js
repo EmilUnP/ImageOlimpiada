@@ -20,7 +20,8 @@ import {
   classifyGeminiError,
 } from './lib/text-translation.js';
 import { applyTextOverlaysToImage } from './lib/local-image-translation.js';
-import { enhancementPrompts, getEnhancementModesList } from './lib/enhancement-modes.js';
+import { enhancementPrompts, getEnhancementModesList, buildEnhancementPrompt } from './lib/enhancement-modes.js';
+import { TEXTBOOK_OCR_PROMPT, buildTextbookImageTranslationPrompt } from './lib/textbook-prompts.js';
 
 dotenv.config();
 
@@ -586,7 +587,7 @@ app.delete('/api/admin/images/:folderType/:filename', async (req, res) => {
 // Image enhancement endpoint
 app.post('/api/enhance-image', async (req, res) => {
   try {
-    const { image, mode = 'photo', intensity = 'medium' } = req.body;
+    const { image, mode = 'textbook', intensity = 'medium' } = req.body;
     
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
@@ -607,19 +608,7 @@ app.post('/api/enhance-image', async (req, res) => {
 
     // Validate mode
     const validMode = enhancementPrompts[mode] ? mode : 'photo';
-    const enhancementConfig = enhancementPrompts[validMode];
-
-    // Adjust prompt based on intensity
-    let intensityModifier = '';
-    if (intensity === 'low') {
-      intensityModifier = ' Apply subtle enhancements only.';
-    } else if (intensity === 'high') {
-      intensityModifier = ' Apply aggressive enhancements for maximum quality improvement.';
-    } else {
-      intensityModifier = ' Apply balanced, moderate enhancements.';
-    }
-
-    const prompt = enhancementConfig.prompt + intensityModifier;
+    const prompt = buildEnhancementPrompt(validMode, intensity);
 
     // Initialize Google Generative AI
     const genAI = createGenerativeAI();
@@ -726,54 +715,7 @@ app.post('/api/detect-text', async (req, res) => {
       ? requestedModel 
       : 'gemini-2.0-flash-exp'; // Default to flash for better availability
 
-    const prompt = `You are an expert OCR (Optical Character Recognition) specialist. Analyze this image and detect ALL text content with maximum accuracy.
-
-CRITICAL REQUIREMENTS:
-1. Detect EVERY piece of text in the image, including:
-   - Headers, titles, subtitles
-   - Body text, paragraphs, sentences
-   - Labels, captions, annotations
-   - Buttons, menu items, navigation text
-   - Watermarks, copyright notices
-   - Numbers, dates, prices, codes
-   - Text in different languages
-   - Text in various fonts, sizes, and styles
-   - Text on different backgrounds (light, dark, colored)
-
-2. For each text block, provide:
-   - The EXACT text content as it appears (preserve capitalization, punctuation, spacing)
-   - A confidence score (0.0 to 1.0) - be honest about uncertainty
-   - Bounding box coordinates if possible (x, y, width, height in pixels)
-
-3. Text detection guidelines:
-   - Read text in reading order (top to bottom, left to right)
-   - Group related text together (e.g., a sentence as one block)
-   - Separate distinct text elements (e.g., title vs body text)
-   - Preserve line breaks and formatting where important
-   - Handle rotated or skewed text if present
-   - Detect text in multiple languages if present
-
-4. Confidence scoring:
-   - 0.9-1.0: Very clear, high-quality text
-   - 0.7-0.89: Clear text with minor uncertainty
-   - 0.5-0.69: Text is readable but may have some errors
-   - Below 0.5: Low confidence, text may be unclear or partially obscured
-
-Return the results as a JSON array with this EXACT structure:
-[
-  {
-    "text": "exact text content here",
-    "confidence": 0.95,
-    "boundingBox": {"x": 10, "y": 20, "width": 100, "height": 30}
-  }
-]
-
-IMPORTANT: 
-- Return ONLY valid JSON, no markdown, no explanations
-- If bounding boxes cannot be determined, omit the "boundingBox" field
-- Be thorough - detect ALL text, even small or partially visible text
-- Maintain the exact text as it appears (don't correct spelling or grammar)
-- Order text blocks in reading order when possible`;
+    const prompt = TEXTBOOK_OCR_PROMPT;
 
     // Initialize Google Generative AI
     const genAI = createGenerativeAI();
@@ -1023,130 +965,31 @@ app.post('/api/translate-image', async (req, res) => {
 
     // Language name mapping for better prompts
     const languageNames = {
-      'en': 'English',
-      'ru': 'Russian',
-      'tr': 'Turkish',
-      'uk': 'Ukrainian',
+      en: 'English',
+      ru: 'Russian',
+      az: 'Azerbaijani',
     };
 
     const targetLangName = languageNames[targetLanguage] || targetLanguage;
 
-    // Log received data for debugging
-    console.log('Translation request received:');
-    console.log('- Target language:', targetLangName);
-    console.log('- Translated texts pairs:', translatedTextPairs ? translatedTextPairs.length : 0);
-    console.log('- Corrected texts:', correctedTexts ? correctedTexts.length : 0);
-    if (translatedTextPairs && translatedTextPairs.length > 0) {
-      console.log('- Text pairs:', translatedTextPairs.map(p => `${p.original} → ${p.translated}`));
-    }
-    
-    // Build comprehensive prompt based on settings
-    let prompt = `You are an expert image translation specialist. Replace ALL text in this image with the provided translations, maintaining professional quality and attention to detail.\n\n`;
-    
-    // Add translated text pairs if provided (preferred method)
-    if (translatedTextPairs && Array.isArray(translatedTextPairs) && translatedTextPairs.length > 0) {
-      prompt += `CRITICAL INSTRUCTIONS - READ CAREFULLY:\n\n`;
-      prompt += `You MUST find and replace the following text in the image EXACTLY as specified:\n\n`;
-      translatedTextPairs.forEach((pair, i) => {
-        if (pair.original && pair.translated) {
-          prompt += `${i + 1}. Find the text: "${pair.original}"\n`;
-          prompt += `   Replace it with: "${pair.translated}"\n`;
-          prompt += `   Keep the same position, size, font, and style\n\n`;
-          if (pair.boundingBox) {
-            const { x, y, width, height } = pair.boundingBox;
-            prompt += `   Bounding box (approx): x=${Math.round(x)}, y=${Math.round(y)}, width=${Math.round(width)}, height=${Math.round(height)}\n\n`;
-          }
-        }
-      });
-      prompt += `VERY IMPORTANT:\n`;
-      prompt += `- Search for each original text EXACTLY as written above\n`;
-      prompt += `- Replace it with the corresponding translation EXACTLY as provided\n`;
-      prompt += `- Maintain the exact same visual appearance (font, size, color, position)\n`;
-      prompt += `- Do NOT translate any other text that is not in the list above\n`;
-      prompt += `- Do NOT modify the image in any other way\n\n`;
-    } else if (correctedTexts && Array.isArray(correctedTexts) && correctedTexts.length > 0) {
-      // Fallback to old method if translatedTexts not provided
-      prompt += `IMPORTANT: The following text blocks have been verified and corrected by the user. Translate these texts to ${targetLangName}:\n${correctedTexts.map((text, i) => `${i + 1}. "${text}"`).join('\n')}\n\n`;
-    } else {
-      // If no specific texts provided, detect and translate all
-      prompt += `Detect ALL text in the image and translate it to ${targetLangName}.\n\n`;
-    }
-    
-    // Quality-specific instructions
-    const qualityInstructions = {
-      standard: "Provide accurate translation with good text rendering.",
-      premium: "Provide highly accurate translation with excellent text rendering, precise font matching, and perfect positioning. Pay extra attention to details.",
-      ultra: "Provide perfect translation with pixel-perfect text rendering, exact font matching, perfect positioning, and flawless visual integration. Maximum attention to every detail."
-    };
-    
-    // Font matching instructions
-    const fontInstructions = {
-      auto: "Intelligently match fonts that are visually similar to the original, considering the target language's typography conventions.",
-      preserve: "Preserve the exact original fonts as much as possible, adapting only the characters to the target language.",
-      native: "Use fonts that are native and natural for the target language while maintaining visual harmony with the original design."
-    };
-    
-    // Text style instructions
-    const styleInstructions = {
-      exact: "Preserve the exact original text style, formatting, and visual appearance.",
-      natural: "Adapt the text style to be natural and readable in the target language while maintaining visual coherence.",
-      adaptive: "Balance between preserving original style and adapting to target language conventions for optimal readability and visual appeal."
-    };
-    
-    prompt += `TRANSLATION REQUIREMENTS:\n\n`;
-    if (translatedTextPairs && translatedTextPairs.length > 0) {
-      prompt += `1. TEXT REPLACEMENT (MANDATORY):\n`;
-      prompt += `   - You have been given ${translatedTextPairs.length} specific text replacement pairs\n`;
-      prompt += `   - For EACH pair, find the original text in the image and replace it with the translation\n`;
-      prompt += `   - Use the EXACT translations provided - do NOT modify, improve, or change them\n`;
-      prompt += `   - Match text positions, sizes, fonts, colors, and styles EXACTLY\n`;
-      prompt += `   - If you cannot find a text, try variations (case-insensitive, with/without spaces)\n`;
-      prompt += `   - DO NOT translate any text that is NOT in the provided list\n`;
-    } else {
-      prompt += `1. TEXT DETECTION & TRANSLATION:\n`;
-      prompt += `   - Identify EVERY piece of text in the image (signs, labels, captions, subtitles, buttons, menus, headers, footers, watermarks, etc.)\n`;
-      prompt += `   - Translate ALL text accurately to ${targetLangName}\n`;
-      prompt += `   - Maintain proper grammar, context, and meaning\n`;
-    }
-    prompt += `   - Preserve numbers, dates, and special characters unless they need localization\n\n`;
-    
-    prompt += `2. VISUAL PRESERVATION:\n`;
-    prompt += `   - Preserve 100% of the original image quality, resolution, and clarity\n`;
-    prompt += `   - Keep ALL colors, gradients, shadows, and visual effects exactly as they are\n`;
-    prompt += `   - Maintain the exact same background, images, graphics, and non-text elements\n`;
-    prompt += `   - Do NOT alter, remove, or modify any visual elements except text\n\n`;
-    
-    prompt += `3. TEXT RENDERING (${quality.toUpperCase()} Quality):\n`;
-    prompt += `   - ${qualityInstructions[quality]}\n`;
-    prompt += `   - ${fontInstructions[fontMatching]}\n`;
-    prompt += `   - ${styleInstructions[textStyle]}\n`;
-    prompt += `   - Maintain exact text positioning, alignment, and spacing\n`;
-    prompt += `   - Preserve text size relationships (headings vs body text)\n`;
-    prompt += `   - Keep text colors, shadows, outlines, and effects identical\n`;
-    if (preserveFormatting) {
-      prompt += `   - Preserve ALL formatting: bold, italic, underline, strikethrough, colors, sizes\n`;
-    }
-    if (enhanceReadability) {
-      prompt += `   - Optimize text for maximum readability in ${targetLangName}\n`;
-      prompt += `   - Ensure proper spacing and line breaks for target language\n`;
-    }
-    prompt += `\n`;
-    
-    prompt += `4. TECHNICAL REQUIREMENTS:\n`;
-    prompt += `   - Output a high-resolution image matching the original dimensions\n`;
-    prompt += `   - Ensure text is crisp, clear, and properly rendered\n`;
-    prompt += `   - Maintain aspect ratio and image proportions\n`;
-    prompt += `   - Preserve image format and quality settings\n`;
-    prompt += `   - Ensure translated text is perfectly integrated and looks natural\n\n`;
-    
-    prompt += `5. QUALITY STANDARDS:\n`;
-    prompt += `   - The translated image should look like it was originally created in ${targetLangName}\n`;
-    prompt += `   - Text should appear natural and professionally rendered\n`;
-    prompt += `   - No artifacts, blur, or quality degradation\n`;
-    prompt += `   - Perfect alignment and positioning of all text elements\n`;
-    prompt += `   - Seamless visual integration of translated text\n\n`;
-    
-    prompt += `OUTPUT: Return ONLY the translated image with all text translated to ${targetLangName}. The image should be visually identical to the original except for the translated text.`;
+    const textPairs = (translatedTextPairs || [])
+      .map((pair) => ({
+        original: typeof pair.original === 'string' ? pair.original.trim() : '',
+        translated: typeof pair.translated === 'string' ? pair.translated.trim() : '',
+        boundingBox: pair.boundingBox,
+      }))
+      .filter((pair) => pair.original && pair.translated);
+
+    const prompt = buildTextbookImageTranslationPrompt({
+      textPairs,
+      correctedTexts,
+      targetLangName,
+      quality,
+      fontMatching,
+      textStyle,
+      preserveFormatting,
+      enhanceReadability,
+    });
 
     // Initialize Google Generative AI
     const genAI = createGenerativeAI();

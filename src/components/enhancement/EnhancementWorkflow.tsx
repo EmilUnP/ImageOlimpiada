@@ -1,24 +1,21 @@
-import { BackButton } from "@/components/shared/BackButton";
+import { useState } from "react";
+import { Sparkles } from "lucide-react";
 import { ImageUpload } from "@/components/shared/ImageUpload";
-import { ImageComparison } from "@/components/shared/ImageComparison";
+import { OptionGrid } from "@/components/shared/OptionGrid";
+import { SegmentedControl } from "@/components/shared/SegmentedControl";
+import { OutputPanel } from "@/components/shared/OutputPanel";
 import { useImageEnhancement } from "@/hooks/useImageEnhancement";
+import { ENHANCEMENT_STYLES, INTENSITY_OPTIONS } from "@/lib/constants";
 import { downloadImage } from "@/lib/utils";
 import { toast } from "sonner";
 
-const DEFAULT_MODE = "photo";
-const DEFAULT_INTENSITY = "medium";
+export const EnhancementWorkflow = () => {
+  const [mode, setMode] = useState("textbook");
+  const [intensity, setIntensity] = useState("medium");
 
-interface EnhancementWorkflowProps {
-  onBack: () => void;
-}
+  const { enhancedImage, isProcessing, handleImageSelect } = useImageEnhancement();
 
-export const EnhancementWorkflow = ({ onBack }: EnhancementWorkflowProps) => {
-  const {
-    originalImage,
-    enhancedImage,
-    isProcessing,
-    handleImageSelect,
-  } = useImageEnhancement();
+  const selectedStyle = ENHANCEMENT_STYLES.find((s) => s.id === mode);
 
   const handleDownload = () => {
     if (!enhancedImage) return;
@@ -27,42 +24,63 @@ export const EnhancementWorkflow = ({ onBack }: EnhancementWorkflowProps) => {
   };
 
   return (
-    <>
-      <BackButton onClick={onBack} variant="floating" />
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Sparkles className="h-5 w-5" />
+        </div>
+        <div>
+          <h1 className="text-xl font-semibold">Image Enhancement</h1>
+          <p className="text-sm text-muted-foreground">
+            Clean up old book scans · {selectedStyle?.name} · {INTENSITY_OPTIONS.find((i) => i.id === intensity)?.label.toLowerCase()}
+          </p>
+        </div>
+      </div>
 
-      {!originalImage ? (
-        <div className="space-y-6">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold mb-2">Enhance Your Image</h2>
-            <p className="text-sm text-muted-foreground">
-              Upload a photo and AI will improve its quality automatically
-            </p>
-          </div>
-          <ImageUpload
-            onImageSelect={(file) => handleImageSelect(file, DEFAULT_MODE, DEFAULT_INTENSITY)}
+      <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_minmax(260px,320px)] gap-5">
+        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+          <OptionGrid
+            title="Styles"
+            items={ENHANCEMENT_STYLES.map(({ id, name, emoji }) => ({ id, name, emoji }))}
+            selectedId={mode}
+            onSelect={setMode}
             disabled={isProcessing}
-            label="Upload Image"
-            description="Drag and drop or click to select an image"
           />
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold mb-2">Your Enhanced Image</h2>
-            <p className="text-sm text-muted-foreground">
-              Compare the original with the enhanced result
-            </p>
+        </section>
+
+        <section className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-5">
+          <div>
+            <h3 className="text-sm font-semibold mb-3">Workspace</h3>
+            <ImageUpload
+              onImageSelect={(file) => handleImageSelect(file, mode, intensity)}
+              disabled={isProcessing}
+              label="Upload book page"
+              description="Scanned question from math, physics, chemistry, or history"
+            />
           </div>
-          <ImageComparison
-            originalImage={originalImage}
-            enhancedImage={enhancedImage}
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Intensity</p>
+            <SegmentedControl
+              options={INTENSITY_OPTIONS.map(({ id, label }) => ({ id, label }))}
+              value={intensity}
+              onChange={setIntensity}
+              disabled={isProcessing}
+            />
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+          <OutputPanel
+            description={selectedStyle?.description}
+            image={enhancedImage}
             isProcessing={isProcessing}
-            onDownload={handleDownload}
-            originalLabel="Original"
-            processedLabel="Enhanced"
+            processingLabel="Enhancing your image..."
+            emptyLabel="Upload an image to see the result"
+            onDownload={enhancedImage ? handleDownload : undefined}
           />
-        </div>
-      )}
-    </>
+        </section>
+      </div>
+    </div>
   );
 };

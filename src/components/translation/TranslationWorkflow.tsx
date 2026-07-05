@@ -1,15 +1,14 @@
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
-import { LanguageSelector } from "./LanguageSelector";
+import { Languages, Loader2 } from "lucide-react";
 import { ImageUpload } from "@/components/shared/ImageUpload";
-import { ImageComparison } from "@/components/shared/ImageComparison";
+import { OptionGrid } from "@/components/shared/OptionGrid";
+import { OutputPanel } from "@/components/shared/OutputPanel";
 import { TextDetectionAndTranslation } from "./TextDetectionAndTranslation";
 import type { DetectedText, TranslatedText } from "@/lib/types";
-import { BackButton } from "@/components/shared/BackButton";
 import { useImageTranslation } from "@/hooks/useImageTranslation";
+import { LANGUAGES } from "@/lib/constants";
 import { downloadImage } from "@/lib/utils";
 import { toast } from "sonner";
-import { LANGUAGES } from "@/lib/constants";
 
 const DEFAULT_TRANSLATION_SETTINGS = {
   quality: "premium" as const,
@@ -19,13 +18,9 @@ const DEFAULT_TRANSLATION_SETTINGS = {
   enhanceReadability: true,
 };
 
-interface TranslationWorkflowProps {
-  onBack: () => void;
-}
-
-export const TranslationWorkflow = ({ onBack }: TranslationWorkflowProps) => {
-  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
-  const [showTextDetection, setShowTextDetection] = useState(false);
+export const TranslationWorkflow = () => {
+  const [selectedLanguage, setSelectedLanguage] = useState("en");
+  const [showTextReview, setShowTextReview] = useState(false);
   const [isTranslatingText, setIsTranslatingText] = useState(false);
 
   const {
@@ -41,16 +36,17 @@ export const TranslationWorkflow = ({ onBack }: TranslationWorkflowProps) => {
     setDetectedTexts,
   } = useImageTranslation();
 
+  const languageName = LANGUAGES.find((l) => l.code === selectedLanguage)?.name || selectedLanguage;
+
   const handleImageUpload = async (file: File) => {
     const base64Image = await handleImageSelect(file, selectedLanguage);
+    if (!base64Image) return;
 
-    if (base64Image) {
-      const texts = await detectTextInImage(base64Image);
-      if (texts.length > 0) {
-        setShowTextDetection(true);
-      } else {
-        toast.error("No text detected in the image");
-      }
+    const texts = await detectTextInImage(base64Image);
+    if (texts.length > 0) {
+      setShowTextReview(true);
+    } else {
+      toast.error("No text detected in the image");
     }
   };
 
@@ -61,17 +57,13 @@ export const TranslationWorkflow = ({ onBack }: TranslationWorkflowProps) => {
         texts.map((t) => t.text),
         selectedLanguage
       );
-
-      if (!translations.length) {
-        return [];
-      }
+      if (!translations.length) return [];
 
       return texts.map((text, index) => ({
         ...text,
         translatedText: translations[index] || "",
       }));
     } catch (error) {
-      console.error("Translation error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to translate text");
       return [];
     } finally {
@@ -80,7 +72,7 @@ export const TranslationWorkflow = ({ onBack }: TranslationWorkflowProps) => {
   };
 
   const handleApplyTranslation = async (finalTranslatedTexts: TranslatedText[]) => {
-    setShowTextDetection(false);
+    setShowTextReview(false);
     if (originalImage) {
       await processTranslation(
         originalImage,
@@ -97,74 +89,85 @@ export const TranslationWorkflow = ({ onBack }: TranslationWorkflowProps) => {
     toast.success("Image downloaded!");
   };
 
-  const languageName = LANGUAGES.find((l) => l.code === selectedLanguage)?.name || selectedLanguage;
-
   return (
-    <>
-      <BackButton onClick={onBack} variant="floating" />
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
+          <Languages className="h-5 w-5" />
+        </div>
+        <div>
+          <h1 className="text-xl font-semibold">Text Translation</h1>
+          <p className="text-sm text-muted-foreground">
+            Translate Russian book questions to {languageName}
+          </p>
+        </div>
+      </div>
 
-      {!originalImage ? (
-        <div className="space-y-8">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold mb-2">Translate Image Text</h2>
+      <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_minmax(260px,320px)] gap-5">
+        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+          <OptionGrid
+            title="Language"
+            items={LANGUAGES.map(({ code, name, emoji }) => ({ id: code, name, emoji }))}
+            selectedId={selectedLanguage}
+            onSelect={setSelectedLanguage}
+            disabled={isProcessing || isDetecting || showTextReview}
+          />
+        </section>
+
+        <section className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-4">
+          <h3 className="text-sm font-semibold">Workspace</h3>
+
+          {!originalImage || showTextReview ? (
+            <>
+              {!showTextReview && (
+                <>
+                  <ImageUpload
+                    onImageSelect={handleImageUpload}
+                    disabled={isProcessing || isDetecting}
+                    label="Upload book page"
+                    description="Russian math, physics, chemistry, or history question"
+                  />
+                  {isDetecting && (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Detecting text...
+                    </div>
+                  )}
+                </>
+              )}
+
+              {showTextReview && originalImage && (
+                <TextDetectionAndTranslation
+                  image={originalImage}
+                  detectedTexts={detectedTexts}
+                  targetLanguage={selectedLanguage}
+                  targetLanguageName={languageName}
+                  onTextsUpdate={setDetectedTexts}
+                  onTranslate={handleTranslateTexts}
+                  onApply={handleApplyTranslation}
+                  isTranslating={isTranslatingText}
+                  isApplying={isProcessing}
+                />
+              )}
+            </>
+          ) : (
             <p className="text-sm text-muted-foreground">
-              Choose a language, upload your image, and review the translation
+              Translation complete. View the result on the right or upload a new image to start over.
             </p>
-          </div>
-          <LanguageSelector
-            language={selectedLanguage}
-            onLanguageChange={setSelectedLanguage}
-            disabled={isProcessing || isDetecting}
-          />
-          <ImageUpload
-            onImageSelect={handleImageUpload}
-            disabled={isProcessing || isDetecting}
-            label="Upload Image"
-            description="Drag and drop or click to select an image with text"
-          />
-          {isDetecting && (
-            <div className="flex items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">Detecting text...</span>
-            </div>
           )}
-        </div>
-      ) : showTextDetection ? (
-        <div className="space-y-6">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold mb-2">Review & Translate</h2>
-            <p className="text-sm text-muted-foreground">
-              Edit detected text if needed, then translate to {languageName}
-            </p>
-          </div>
-          <TextDetectionAndTranslation
-            image={originalImage}
-            detectedTexts={detectedTexts}
-            targetLanguage={selectedLanguage}
-            targetLanguageName={languageName}
-            onTextsUpdate={setDetectedTexts}
-            onTranslate={handleTranslateTexts}
-            onApply={handleApplyTranslation}
-            isTranslating={isTranslatingText}
-            isApplying={isProcessing}
-          />
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold mb-2">Translated Image</h2>
-            <p className="text-sm text-muted-foreground">Translated to {languageName}</p>
-          </div>
-          <ImageComparison
-            originalImage={originalImage}
-            enhancedImage={translatedImage}
+        </section>
+
+        <section className="rounded-xl border border-border/60 bg-card/50 p-4">
+          <OutputPanel
+            description={`Translated to ${languageName}`}
+            image={translatedImage}
             isProcessing={isProcessing}
-            onDownload={handleDownload}
-            originalLabel="Original"
-            processedLabel="Translated"
+            processingLabel="Applying translation..."
+            emptyLabel="Upload a book page to see the translation"
+            onDownload={translatedImage ? handleDownload : undefined}
           />
-        </div>
-      )}
-    </>
+        </section>
+      </div>
+    </div>
   );
 };

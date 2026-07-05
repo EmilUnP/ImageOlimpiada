@@ -1,5 +1,6 @@
 import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
+import { TEXTBOOK_OCR_PROMPT } from '../server/lib/textbook-prompts.js';
 
 const AVAILABLE_MODELS = [
   'gemini-2.0-flash-exp',
@@ -20,40 +21,7 @@ const GENERATION_CONFIG = {
   maxOutputTokens: 8192,
 };
 
-const TEXT_DETECTION_PROMPT = `You are an expert OCR (Optical Character Recognition) specialist. Analyze this image and detect ALL text content with maximum accuracy.
-
-CRITICAL REQUIREMENTS:
-1. Detect EVERY piece of text in the image, including:
-   - Headers, titles, subtitles
-   - Body text, paragraphs, sentences
-   - Labels, captions, annotations
-   - Buttons, menus, navigation text
-   - Watermarks or copyright notices
-   - Numbers, dates, prices, codes
-   - Text in multiple languages, fonts, sizes, or orientations
-2. For each text block, provide:
-   - The EXACT text content as it appears (preserve casing, punctuation, spacing)
-   - A confidence score between 0.0 and 1.0
-   - Bounding box coordinates if possible (x, y, width, height in pixels)
-3. Return ONLY valid JSON using this exact structure:
-[
-  {
-    "id": "text-1",
-    "text": "exact text content here",
-    "confidence": 0.95,
-    "boundingBox": {
-      "x": 100,
-      "y": 50,
-      "width": 200,
-      "height": 30
-    }
-  }
-]
-
-IMPORTANT:
-- Return only JSON. No markdown, commentary, or extra text.
-- If bounding boxes are unavailable, omit the "boundingBox" field entirely.
-- Order results in natural reading order.`;
+const TEXT_DETECTION_PROMPT = TEXTBOOK_OCR_PROMPT;
 
 const extractMimeType = (base64Image, fallback = 'image/jpeg') => {
   if (typeof base64Image !== 'string') return fallback;
