@@ -15,16 +15,40 @@ const OPENROUTER_MODEL_MAP = {
 
 const isPlaceholderKey = (key) => !key || key === 'your_api_key_here';
 
+const isOpenRouterKey = (key) => typeof key === 'string' && key.startsWith('sk-or-');
+
 export const resolveAiProvider = () => {
   const explicit = process.env.AI_PROVIDER?.toLowerCase();
-  if (explicit === 'openrouter' || explicit === 'gemini') {
-    return explicit;
-  }
-
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   const geminiKey = process.env.GEMINI_API_KEY;
 
-  if (!isPlaceholderKey(openRouterKey) && isPlaceholderKey(geminiKey)) {
+  const hasOpenRouterKey = !isPlaceholderKey(openRouterKey);
+  const hasGeminiKey = !isPlaceholderKey(geminiKey);
+
+  if (explicit === 'openrouter') {
+    if (hasOpenRouterKey || isOpenRouterKey(geminiKey)) return 'openrouter';
+    if (hasGeminiKey) {
+      console.warn(
+        '[ai-provider] AI_PROVIDER=openrouter but OPENROUTER_API_KEY is missing. Falling back to Gemini.'
+      );
+      return 'gemini';
+    }
+    return 'openrouter';
+  }
+
+  if (explicit === 'gemini') {
+    return 'gemini';
+  }
+
+  if (hasOpenRouterKey && !hasGeminiKey) {
+    return 'openrouter';
+  }
+
+  if (isOpenRouterKey(geminiKey) && !hasGeminiKey) {
+    return 'openrouter';
+  }
+
+  if (hasOpenRouterKey && isPlaceholderKey(geminiKey)) {
     return 'openrouter';
   }
 
@@ -37,8 +61,13 @@ export const resolveAiProvider = () => {
 
 export const getAiApiKey = (provider = resolveAiProvider()) => {
   if (provider === 'openrouter') {
-    const key = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
-    return isPlaceholderKey(key) ? null : key;
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    if (!isPlaceholderKey(openRouterKey)) return openRouterKey;
+
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (isOpenRouterKey(geminiKey)) return geminiKey;
+
+    return null;
   }
 
   const key = process.env.GEMINI_API_KEY;
@@ -55,11 +84,11 @@ export const validateAiConfig = () => {
       body: {
         error:
           provider === 'openrouter'
-            ? 'AI service not configured. Please set OPENROUTER_API_KEY environment variable'
+            ? 'AI service not configured. Set OPENROUTER_API_KEY (starts with sk-or-) or change AI_PROVIDER=gemini'
             : 'AI service not configured. Please set GEMINI_API_KEY environment variable',
         instructions:
           provider === 'openrouter'
-            ? 'Get your API key from https://openrouter.ai/keys and set AI_PROVIDER=openrouter'
+            ? 'Get your API key from https://openrouter.ai/keys — do not use a Google Gemini key with OpenRouter'
             : 'Get your API key from https://aistudio.google.com/app/apikey and add it to environment variables',
       },
     };

@@ -4,9 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node ./node_modules/vite/bin/vite.js",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "node ./node_modules/vite/bin/vite.js",
     "dev:backend": "node server/index.js",
-    "dev:all": "concurrently \"npm run dev:backend\" \"npm run dev\"",
+    "dev:all": "npm run dev",
+    "stop": "powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 3001,8080 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }\"",
     "build": "node ./node_modules/vite/bin/vite.js build",
     "build:dev": "node ./node_modules/vite/bin/vite.js build --mode development",
     "lint": "eslint .",

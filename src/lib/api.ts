@@ -1,5 +1,16 @@
 export const getApiUrl = (): string => {
-  return import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
+  // In dev, use same origin so Vite proxies /api → localhost:3001
+  return import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? '' : '');
+};
+
+const wrapNetworkError = (error: unknown, action: string): Error => {
+  if (error instanceof TypeError && /fetch|network|failed/i.test(error.message)) {
+    return new Error(
+      `Cannot reach the API server. Run "npm run dev" (starts frontend + backend) or "npm run dev:backend" in a separate terminal.`
+    );
+  }
+  if (error instanceof Error) return error;
+  return new Error(`${action}: ${String(error)}`);
 };
 
 export interface EnhanceImageRequest {
@@ -81,20 +92,24 @@ export interface DetectTextResponse {
 
 export const enhanceImage = async (request: EnhanceImageRequest): Promise<EnhanceImageResponse> => {
   const API_URL = getApiUrl();
-  const response = await fetch(`${API_URL}/api/enhance-image`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  });
+  try {
+    const response = await fetch(`${API_URL}/api/enhance-image`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || `Failed to process image. Error: ${response.status}`);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Failed to process image. Error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    throw wrapNetworkError(error, 'Failed to enhance image');
   }
-
-  return await response.json();
 };
 
 export const translateImage = async (request: TranslateImageRequest): Promise<TranslateImageResponse> => {
@@ -151,10 +166,7 @@ export const detectText = async (request: DetectTextRequest): Promise<DetectText
 
     return await response.json();
   } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(`Failed to detect text: ${String(error)}`);
+    throw wrapNetworkError(error, 'Failed to detect text');
   }
 };
 

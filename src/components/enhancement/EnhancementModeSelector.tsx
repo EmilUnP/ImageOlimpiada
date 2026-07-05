@@ -11,6 +11,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { getApiUrl } from "@/lib/api";
 
 interface EnhancementMode {
   id: string;
@@ -39,8 +40,7 @@ export const EnhancementModeSelector = ({
   useEffect(() => {
     const fetchModes = async () => {
       try {
-        // Use relative URL for Vercel, or localhost for development
-        const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
+        const API_URL = getApiUrl();
         const response = await fetch(`${API_URL}/api/enhancement-modes`);
         if (response.ok) {
           const data = await response.json();
