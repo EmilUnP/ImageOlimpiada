@@ -65,7 +65,10 @@ const OPENROUTER_MODEL_MAP = {
 
 const isPlaceholderKey = (key) => !key || key === 'your_api_key_here';
 
-const isGoogleAiStudioKey = (key) => typeof key === 'string' && key.startsWith('AIza');
+const isValidGeminiKey = (key) =>
+  typeof key === 'string' &&
+  (key.startsWith('AIza') || key.startsWith('AQ.')) &&
+  key.length > 10;
 
 const getImageModelsForProvider = (provider, explicitModel) => {
   if (explicitModel) {
@@ -169,13 +172,23 @@ export const validateAiConfig = () => {
     };
   }
 
-  if (provider === 'gemini' && !isOpenRouterKey(apiKey) && !isGoogleAiStudioKey(apiKey)) {
+  if (provider === 'gemini' && isOpenRouterKey(apiKey)) {
     return {
       status: 500,
       body: {
-        error: 'GEMINI_API_KEY is not a valid Google AI Studio key.',
+        error: 'GEMINI_API_KEY looks like an OpenRouter key (sk-or-).',
+        instructions: 'Set AI_PROVIDER=openrouter with OPENROUTER_API_KEY, or use a Google key (AIza... or AQ....) from https://aistudio.google.com/app/apikey',
+      },
+    };
+  }
+
+  if (provider === 'gemini' && !isValidGeminiKey(apiKey)) {
+    return {
+      status: 500,
+      body: {
+        error: 'GEMINI_API_KEY format is not recognized.',
         instructions:
-          'Create a free key at https://aistudio.google.com/app/apikey — it must start with AIza. Keys starting with AQ. or sk-or- are for other services and will not work here.',
+          'Use a Google AI Studio key from https://aistudio.google.com/app/apikey — standard keys start with AIza, newer auth keys start with AQ.',
       },
     };
   }
