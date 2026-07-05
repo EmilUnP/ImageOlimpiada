@@ -1,7 +1,7 @@
 export const LANGUAGES = [
-  { code: 'en', name: 'English', emoji: '🇬🇧' },
-  { code: 'ru', name: 'Russian', emoji: '🇷🇺' },
-  { code: 'az', name: 'Azerbaijani', emoji: '🇦🇿' },
+  { code: 'en', name: 'English', flagCode: 'GB' },
+  { code: 'ru', name: 'Russian', flagCode: 'RU' },
+  { code: 'az', name: 'Azerbaijani', flagCode: 'AZ' },
 ] as const;
 
 export const ENHANCEMENT_STYLES = [

@@ -1,9 +1,11 @@
+import { FlagIcon } from "@/components/shared/FlagIcon";
 import { cn } from "@/lib/utils";
 
 interface OptionGridItem {
   id: string;
   name: string;
   emoji?: string;
+  flagCode?: string;
 }
 
 interface OptionGridProps {
@@ -41,7 +43,11 @@ export const OptionGrid = ({
                 disabled && "opacity-50 cursor-not-allowed"
               )}
             >
-              {item.emoji && <span className="text-xl mb-1">{item.emoji}</span>}
+              {item.flagCode ? (
+                <FlagIcon code={item.flagCode} title={item.name} className="mb-1.5 h-6 w-9" />
+              ) : item.emoji ? (
+                <span className="text-xl mb-1">{item.emoji}</span>
+              ) : null}
               <span className="text-xs font-medium">{item.name}</span>
             </button>
           );

@@ -107,7 +107,7 @@ export const TranslationWorkflow = () => {
         <section className="rounded-xl border border-border/60 bg-card/50 p-4">
           <OptionGrid
             title="Language"
-            items={LANGUAGES.map(({ code, name, emoji }) => ({ id: code, name, emoji }))}
+            items={LANGUAGES.map(({ code, name, flagCode }) => ({ id: code, name, flagCode }))}
             selectedId={selectedLanguage}
             onSelect={setSelectedLanguage}
             disabled={isProcessing || isDetecting || showTextReview}
