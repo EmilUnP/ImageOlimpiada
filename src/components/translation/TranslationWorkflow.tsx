@@ -6,6 +6,7 @@ import { OptionGrid } from "@/components/shared/OptionGrid";
 import { OutputPanel } from "@/components/shared/OutputPanel";
 import { Panel } from "@/components/shared/Panel";
 import { WorkflowHeader } from "@/components/shared/WorkflowHeader";
+import { ModelFamilySelector } from "@/components/shared/ModelFamilySelector";
 import { StepIndicator, getStepStatus } from "@/components/shared/StepIndicator";
 import { TranslationPhaseBanner } from "./TranslationPhaseBanner";
 import { TextDetectionAndTranslation } from "./TextDetectionAndTranslation";
@@ -14,12 +15,25 @@ import { useImageTranslation } from "@/hooks/useImageTranslation";
 import { LANGUAGES } from "@/lib/constants";
 import { downloadImage } from "@/lib/utils";
 import { toast } from "sonner";
+import type { ModelFamily } from "@/lib/api";
 
 const DEFAULT_TRANSLATION_SETTINGS = {
   quality: "premium" as const,
 };
 
-export const TranslationWorkflow = () => {
+interface TranslationWorkflowProps {
+  modelFamily?: ModelFamily;
+  onModelFamilyChange?: (family: ModelFamily) => void;
+  showModelFamilySelector?: boolean;
+  modelFamilyOptions?: Array<{ id: ModelFamily; label: string }>;
+}
+
+export const TranslationWorkflow = ({
+  modelFamily,
+  onModelFamilyChange,
+  showModelFamilySelector = false,
+  modelFamilyOptions = [],
+}: TranslationWorkflowProps) => {
   const [selectedLanguage, setSelectedLanguage] = useState("az");
   const [showTextReview, setShowTextReview] = useState(false);
   const [isTranslatingText, setIsTranslatingText] = useState(false);
@@ -69,7 +83,7 @@ export const TranslationWorkflow = () => {
     const base64Image = await handleImageSelect(file, selectedLanguage);
     if (!base64Image) return;
 
-    const texts = await detectTextInImage(base64Image);
+    const texts = await detectTextInImage(base64Image, undefined, modelFamily);
     if (texts.length > 0) {
       setShowTextReview(true);
     } else {
@@ -82,7 +96,8 @@ export const TranslationWorkflow = () => {
     try {
       const translations = await translateTexts(
         texts.map((t) => t.text),
-        selectedLanguage
+        selectedLanguage,
+        modelFamily
       );
       if (!translations.length) return [];
 
@@ -105,7 +120,7 @@ export const TranslationWorkflow = () => {
         originalImage,
         selectedLanguage,
         finalTranslatedTexts,
-        DEFAULT_TRANSLATION_SETTINGS
+        { ...DEFAULT_TRANSLATION_SETTINGS, modelFamily }
       );
     }
   };
@@ -166,6 +181,17 @@ export const TranslationWorkflow = () => {
           <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
             Pick the language that should appear on the final image.
           </p>
+
+          {showModelFamilySelector && modelFamily && onModelFamilyChange && (
+            <div className="mt-4 pt-4 border-t border-border/40">
+              <ModelFamilySelector
+                options={modelFamilyOptions}
+                value={modelFamily}
+                onChange={onModelFamilyChange}
+                disabled={workspaceLocked}
+              />
+            </div>
+          )}
         </Panel>
 
         <Panel

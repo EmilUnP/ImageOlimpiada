@@ -22,6 +22,8 @@ import {
   resolveAiProvider,
   logActiveModelConfig,
   DEFAULT_IMAGE_MODEL,
+  resolveModelFamily,
+  getPublicAiConfig,
 } from './lib/ai-provider.js';
 import {
   createTextTranslationService,
@@ -375,6 +377,11 @@ app.get('/api/enhancement-modes', (req, res) => {
   res.json({ modes: getEnhancementModesList() });
 });
 
+app.get('/api/ai-config', (req, res) => {
+  const provider = resolveAiProvider();
+  res.json(getPublicAiConfig(provider));
+});
+
 // Admin API endpoints for viewing uploaded images
 app.get('/api/admin/images/:folderType', async (req, res) => {
   try {
@@ -539,7 +546,7 @@ app.delete('/api/admin/images/:folderType/:filename', async (req, res) => {
 // Image enhancement endpoint
 app.post('/api/enhance-image', async (req, res) => {
   try {
-    const { image, mode = 'textbook', intensity = 'medium' } = req.body;
+    const { image, mode = 'textbook', intensity = 'medium', modelFamily } = req.body;
     
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
@@ -572,12 +579,14 @@ app.post('/api/enhance-image', async (req, res) => {
       }
 
       const base64Data = image.split(',')[1] || image;
+      const family = resolveModelFamily(modelFamily);
       const result = await generateWithProviderFallback({
-        model: getDefaultImageModel(),
+        model: getDefaultImageModel(undefined, family),
         parts: [
           prompt,
           { inlineData: { data: base64Data, mimeType } },
         ],
+        modelFamily: family,
       });
 
       const response = await result.response;
@@ -635,7 +644,7 @@ app.post('/api/enhance-image', async (req, res) => {
 // Text detection endpoint
 app.post('/api/detect-text', async (req, res) => {
   try {
-    const { image, model: requestedModel } = req.body;
+    const { image, model: requestedModel, modelFamily } = req.body;
     
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
@@ -654,13 +663,15 @@ app.post('/api/detect-text', async (req, res) => {
       return res.status(configError.status).json(configError.body);
     }
 
-    const availableModels = getPreferredVisionModels();
+    const family = resolveModelFamily(modelFamily);
+    const provider = resolveAiProvider();
+    const availableModels = getPreferredVisionModels(family, provider);
     const configuredVisionModel = process.env.GEMINI_VISION_MODEL?.trim();
 
     const modelName =
       requestedModel && availableModels.includes(requestedModel)
         ? requestedModel
-        : getDefaultVisionModel();
+        : getDefaultVisionModel(provider, family);
 
     const prompt = TEXTBOOK_OCR_PROMPT;
 
@@ -828,7 +839,7 @@ app.post('/api/detect-text', async (req, res) => {
 // Text translation endpoint (translates text only, not images)
 app.post('/api/translate-text', async (req, res) => {
   try {
-    const { texts, targetLanguage = 'en' } = req.body;
+    const { texts, targetLanguage = 'en', modelFamily } = req.body;
 
     if (!texts || !Array.isArray(texts) || texts.length === 0) {
       return res.status(400).json({ error: 'No texts provided' });
@@ -846,6 +857,7 @@ app.post('/api/translate-text', async (req, res) => {
       const { translations, sanitizedCount, targetLanguageName } = await translator.translateTexts({
         texts,
         targetLanguage,
+        modelFamily: resolveModelFamily(modelFamily),
       });
 
       if (sanitizedCount === 0) {
@@ -885,6 +897,7 @@ app.post('/api/translate-image', async (req, res) => {
       translatedTexts: translatedTextPairs,
       correctedTexts,
       quality = 'premium',
+      modelFamily,
     } = req.body;
     
     if (!image) {
@@ -917,6 +930,7 @@ app.post('/api/translate-image', async (req, res) => {
         targetLangName,
         quality,
         correctedTexts,
+        modelFamily: resolveModelFamily(modelFamily),
       });
 
       if (result.method !== 'ai-image' || !result.translatedImage) {

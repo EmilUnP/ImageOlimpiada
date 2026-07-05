@@ -200,7 +200,7 @@ const translateBatch = async ({ model, batch, targetLanguageName, generationConf
   return tryParseJsonArray(text, batch.length);
 };
 
-export const performTranslations = async ({ genAI, items, targetLanguageName }) => {
+export const performTranslations = async ({ genAI, items, targetLanguageName, modelFamily = 'gemini' }) => {
   const generationConfig = {
     temperature: 0.3,
     topP: 0.9,
@@ -208,7 +208,7 @@ export const performTranslations = async ({ genAI, items, targetLanguageName }) 
     maxOutputTokens: 2048,
   };
 
-  const preferredModels = getPreferredVisionModels();
+  const preferredModels = getPreferredVisionModels(modelFamily);
   const configuredModel = process.env.GEMINI_VISION_MODEL?.trim();
 
   let lastError;
@@ -291,7 +291,7 @@ export const performTranslations = async ({ genAI, items, targetLanguageName }) 
 
 export const createTextTranslationService = (genAI) => {
   return {
-    async translateTexts({ texts, targetLanguage }) {
+    async translateTexts({ texts, targetLanguage, modelFamily = 'gemini' }) {
       if (!Array.isArray(texts)) {
         throw new TranslationServiceError('Texts must be provided as an array', { statusCode: 400 });
       }
@@ -312,6 +312,7 @@ export const createTextTranslationService = (genAI) => {
         genAI,
         items: sanitizedItems,
         targetLanguageName,
+        modelFamily,
       });
 
       sanitizedItems.forEach((item) => {

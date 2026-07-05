@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { enhanceImage, EnhanceImageRequest } from '@/lib/api';
+import { enhanceImage, EnhanceImageRequest, type ModelFamily } from '@/lib/api';
 import { useImageUpload } from './useImageUpload';
 
 export interface ProcessedImage {
@@ -22,7 +22,8 @@ export const useImageEnhancement = () => {
   const processImage = useCallback(async (
     base64Image: string,
     mode: string,
-    intensity: string
+    intensity: string,
+    modelFamily?: ModelFamily
   ) => {
     setIsProcessing(true);
     try {
@@ -30,6 +31,7 @@ export const useImageEnhancement = () => {
         image: base64Image,
         mode,
         intensity,
+        modelFamily,
       };
 
       const data = await enhanceImage(request);
@@ -55,12 +57,13 @@ export const useImageEnhancement = () => {
   const handleImageSelect = useCallback(async (
     file: File,
     mode: string,
-    intensity: string
+    intensity: string,
+    modelFamily?: ModelFamily
   ) => {
     const base64Image = await fileToBase64(file);
     setOriginalImage(base64Image);
     setEnhancedImage(null);
-    await processImage(base64Image, mode, intensity);
+    await processImage(base64Image, mode, intensity, modelFamily);
   }, [fileToBase64, processImage]);
 
   const reset = useCallback(() => {

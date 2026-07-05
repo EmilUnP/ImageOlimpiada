@@ -1,15 +1,31 @@
 import '../load-env.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  readEnvModel,
+  resolveModelFamily,
+  getOpenRouterImageModel,
+  getOpenRouterVisionModel,
+  getOpenRouterImageModels,
+  getOpenRouterVisionModels,
+  isOpenRouterImageModel,
+  getPublicAiConfig,
+  logOpenRouterModelConfig,
+  getOpenRouterVisionMaxTokens,
+} from './model-config.js';
+
+export {
+  readEnvModel,
+  resolveModelFamily,
+  getOpenRouterImageModel,
+  getOpenRouterVisionModel,
+  getOpenRouterImageModels,
+  getOpenRouterVisionModels,
+  isOpenRouterImageModel,
+  getPublicAiConfig,
+  getOpenRouterVisionMaxTokens,
+} from './model-config.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
-const getOpenRouterDefaultImageModel = () =>
-  process.env.IMAGE_MODEL?.trim() || 'gemini-2.5-flash-image-preview';
-
-const readEnvModel = (key) => {
-  const value = process.env[key];
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
-};
 
 /**
  * Google AI Studio — image IN + image OUT (enhance / translate image).
@@ -45,16 +61,24 @@ const OPENROUTER_TO_GEMINI_DIRECT = {
 export const normalizeDirectImageModel = (modelName) =>
   OPENROUTER_TO_GEMINI_DIRECT[modelName] || modelName;
 
-export const getDefaultImageModel = (provider = resolveAiProvider()) =>
+export const getDefaultImageModel = (provider = resolveAiProvider(), modelFamily = 'gemini') =>
   provider === 'openrouter'
-    ? getOpenRouterDefaultImageModel()
+    ? getOpenRouterImageModel(resolveModelFamily(modelFamily))
     : readEnvModel('GEMINI_IMAGE_MODEL') || GEMINI_IMAGE_MODELS[0];
 
-export const getDefaultVisionModel = () =>
-  readEnvModel('GEMINI_VISION_MODEL') || GEMINI_VISION_MODELS[0];
+export const getDefaultVisionModel = (provider = resolveAiProvider(), modelFamily = 'gemini') => {
+  if (provider === 'openrouter') {
+    return getOpenRouterVisionModel(resolveModelFamily(modelFamily));
+  }
+  return readEnvModel('GEMINI_VISION_MODEL') || GEMINI_VISION_MODELS[0];
+};
 
 /** Vision models to try — env model first, then fallbacks (deduped) */
-export const getPreferredVisionModels = () => {
+export const getPreferredVisionModels = (modelFamily = 'gemini', provider = resolveAiProvider()) => {
+  if (provider === 'openrouter') {
+    return getOpenRouterVisionModels(resolveModelFamily(modelFamily));
+  }
+
   const envModel = readEnvModel('GEMINI_VISION_MODEL');
   if (envModel) {
     return [envModel, ...GEMINI_VISION_MODELS.filter((m) => m !== envModel)];
@@ -76,7 +100,7 @@ export const getPreferredImageModels = (explicitModel) => {
 
 export const logActiveModelConfig = () => {
   const provider = resolveAiProvider();
-  const vision = getPreferredVisionModels();
+  const vision = getPreferredVisionModels('gemini', provider);
   const image = getPreferredImageModels();
   console.log('[ai-provider] ── Active model configuration ──');
   console.log(`  Provider:        ${provider}`);
@@ -84,19 +108,39 @@ export const logActiveModelConfig = () => {
   console.log(`  GEMINI_IMAGE_MODEL (env):  ${readEnvModel('GEMINI_IMAGE_MODEL') || '(not set)'}`);
   console.log(`  OCR / translate chain:     ${vision.slice(0, 4).join(' → ')}`);
   console.log(`  Image edit chain:          ${image.slice(0, 4).join(' → ')}`);
+  if (provider === 'openrouter') {
+    logOpenRouterModelConfig();
+  }
   console.log('[ai-provider] ─────────────────────────────────');
 };
 
 /** Pick image model for translate-image based on quality tier */
-export const getImageModelForQuality = (quality = 'premium', provider = resolveAiProvider()) => {
-  const envModel = readEnvModel('GEMINI_IMAGE_MODEL');
-  if (envModel) {
-    return provider === 'gemini' ? normalizeDirectImageModel(envModel) : envModel;
+export const getImageModelForQuality = (
+  quality = 'premium',
+  provider = resolveAiProvider(),
+  modelFamily = 'gemini'
+) => {
+  const family = resolveModelFamily(modelFamily);
+
+  if (provider === 'openrouter') {
+    const familyEnvKey =
+      family === 'openai' ? 'OPENROUTER_OPENAI_IMAGE_MODEL' : 'OPENROUTER_GEMINI_IMAGE_MODEL';
+    if (readEnvModel(familyEnvKey) || (family === 'gemini' && readEnvModel('IMAGE_MODEL'))) {
+      return getOpenRouterImageModel(family);
+    }
+    if (family === 'openai') return getOpenRouterImageModel('openai');
+
+    if (quality === 'ultra') return 'google/gemini-3-pro-image-preview';
+    if (quality === 'premium') return 'google/gemini-3.1-flash-image-preview';
+    return getOpenRouterImageModel('gemini');
   }
+
+  const envModel = readEnvModel('GEMINI_IMAGE_MODEL');
+  if (envModel) return normalizeDirectImageModel(envModel);
 
   if (quality === 'ultra') return 'gemini-3-pro-image';
   if (quality === 'premium') return 'gemini-3.1-flash-image';
-  return getDefaultImageModel(provider);
+  return getDefaultImageModel(provider, family);
 };
 
 /** @deprecated use getDefaultImageModel() */
@@ -115,6 +159,7 @@ const OPENROUTER_MODEL_MAP = {
   'gemini-2.0-flash': 'google/gemini-2.0-flash',
   'gemini-2.5-flash': 'google/gemini-2.5-flash',
   'gemini-2.5-pro': 'google/gemini-2.5-pro',
+  'imagen-3.0-generate-002': 'google/imagen-3.0-generate-002',
 };
 
 const isPlaceholderKey = (key) => !key || key === 'your_api_key_here';
@@ -124,10 +169,9 @@ const isValidGeminiKey = (key) =>
   (key.startsWith('AIza') || key.startsWith('AQ.')) &&
   key.length > 10;
 
-const getImageModelsForProvider = (provider, explicitModel) => {
+const getImageModelsForProvider = (provider, explicitModel, modelFamily = 'gemini') => {
   if (provider === 'openrouter') {
-    if (explicitModel) return [explicitModel];
-    return [getOpenRouterDefaultImageModel()];
+    return getOpenRouterImageModels(resolveModelFamily(modelFamily), explicitModel);
   }
 
   return getPreferredImageModels(explicitModel);
@@ -325,11 +369,13 @@ class OpenRouterModel {
       if (maxOutputTokens !== undefined) body.max_tokens = maxOutputTokens;
     }
 
-    if (this.modelName.includes('image')) {
+    if (isOpenRouterImageModel(this.modelName)) {
       body.modalities = ['image', 'text'];
       if (body.max_tokens === undefined) {
         body.max_tokens = OPENROUTER_IMAGE_MAX_TOKENS;
       }
+    } else if (body.max_tokens === undefined || body.max_tokens > getOpenRouterVisionMaxTokens()) {
+      body.max_tokens = getOpenRouterVisionMaxTokens();
     }
 
     const response = await fetch(OPENROUTER_API_URL, {
@@ -389,9 +435,15 @@ const isRetryableProviderError = (error) => {
 };
 
 /** Try primary provider, then fall back; try multiple image models per provider on 404 */
-export async function generateWithProviderFallback({ model, parts, generationConfig = {} }) {
+export async function generateWithProviderFallback({
+  model,
+  parts,
+  generationConfig = {},
+  modelFamily = 'gemini',
+}) {
   const primary = resolveAiProvider();
-  const resolvedModel = model?.trim() || getDefaultImageModel(primary);
+  const family = resolveModelFamily(modelFamily);
+  const resolvedModel = model?.trim() || getDefaultImageModel(primary, family);
   const envImageModel = readEnvModel('GEMINI_IMAGE_MODEL');
 
   const alternate = primary === 'openrouter' ? 'gemini' : 'openrouter';
@@ -406,7 +458,7 @@ export async function generateWithProviderFallback({ model, parts, generationCon
     const apiKey = getAiApiKey(provider);
     if (!apiKey) continue;
 
-    const models = getImageModelsForProvider(provider, resolvedModel);
+    const models = getImageModelsForProvider(provider, resolvedModel, family);
 
     for (let mi = 0; mi < models.length; mi++) {
       const modelName = models[mi];

@@ -13,10 +13,30 @@ const wrapNetworkError = (error: unknown, action: string): Error => {
   return new Error(`${action}: ${String(error)}`);
 };
 
+export type ModelFamily = "gemini" | "openai";
+
+export interface AiConfigResponse {
+  provider: "gemini" | "openrouter";
+  configuredProvider?: "gemini" | "openrouter";
+  showModelFamilySelector: boolean;
+  modelFamilies: Array<{ id: ModelFamily; label: string }>;
+  defaultModelFamily: ModelFamily;
+}
+
+export const fetchAiConfig = async (): Promise<AiConfigResponse> => {
+  const API_URL = getApiUrl();
+  const response = await fetch(`${API_URL}/api/ai-config`);
+  if (!response.ok) {
+    throw new Error("Failed to load AI configuration");
+  }
+  return response.json();
+};
+
 export interface EnhanceImageRequest {
   image: string;
   mode: string;
   intensity: string;
+  modelFamily?: ModelFamily;
 }
 
 export interface EnhanceImageResponse {
@@ -30,6 +50,7 @@ export interface EnhanceImageResponse {
 export interface TranslateTextRequest {
   texts: string[];
   targetLanguage: string;
+  modelFamily?: ModelFamily;
 }
 
 export interface TranslateTextResponse {
@@ -47,6 +68,7 @@ export interface TranslateImageRequest {
   }>;
   correctedTexts?: string[];
   quality?: "standard" | "premium" | "ultra";
+  modelFamily?: ModelFamily;
 }
 
 export interface TranslateImageResponse {
@@ -61,7 +83,8 @@ export interface TranslateImageResponse {
 
 export interface DetectTextRequest {
   image: string;
-  model?: string; // Optional: specify model to use
+  model?: string;
+  modelFamily?: ModelFamily;
 }
 
 export interface DetectedTextItem {

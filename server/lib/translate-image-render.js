@@ -36,6 +36,7 @@ export async function renderTranslatedImage({
   targetLangName,
   quality = 'premium',
   correctedTexts,
+  modelFamily = 'gemini',
 }) {
   const pairs = textPairs.filter((p) => p.original?.trim() && p.translated?.trim());
   const hasPairs = pairs.length > 0;
@@ -49,7 +50,7 @@ export async function renderTranslatedImage({
     };
   }
 
-  const imageModel = getImageModelForQuality(quality);
+  const imageModel = getImageModelForQuality(quality, undefined, modelFamily);
   const { mimeType, data } = parseBase64Image(image);
 
   if (!data) {
@@ -75,6 +76,7 @@ export async function renderTranslatedImage({
   const result = await generateWithProviderFallback({
     model: imageModel,
     parts: [prompt, { inlineData: { data, mimeType } }],
+    modelFamily,
   });
 
   const response = await result.response;

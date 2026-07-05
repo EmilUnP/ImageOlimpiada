@@ -7,12 +7,26 @@ import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { IntensityBars } from "@/components/shared/IntensityBars";
 import { OutputPanel } from "@/components/shared/OutputPanel";
 import { WorkflowHeader } from "@/components/shared/WorkflowHeader";
+import { ModelFamilySelector } from "@/components/shared/ModelFamilySelector";
 import { useImageEnhancement } from "@/hooks/useImageEnhancement";
 import { ENHANCEMENT_STYLES, INTENSITY_OPTIONS } from "@/lib/constants";
 import { downloadImage } from "@/lib/utils";
 import { toast } from "sonner";
+import type { ModelFamily } from "@/lib/api";
 
-export const EnhancementWorkflow = () => {
+interface EnhancementWorkflowProps {
+  modelFamily?: ModelFamily;
+  onModelFamilyChange?: (family: ModelFamily) => void;
+  showModelFamilySelector?: boolean;
+  modelFamilyOptions?: Array<{ id: ModelFamily; label: string }>;
+}
+
+export const EnhancementWorkflow = ({
+  modelFamily,
+  onModelFamilyChange,
+  showModelFamilySelector = false,
+  modelFamilyOptions = [],
+}: EnhancementWorkflowProps) => {
   const [mode, setMode] = useState("textbook");
   const [intensity, setIntensity] = useState("medium");
 
@@ -48,8 +62,17 @@ export const EnhancementWorkflow = () => {
 
         <Panel title="Workspace" description="Upload a scanned page to enhance">
           <div className="space-y-4">
+            {showModelFamilySelector && modelFamily && onModelFamilyChange && (
+              <ModelFamilySelector
+                options={modelFamilyOptions}
+                value={modelFamily}
+                onChange={onModelFamilyChange}
+                disabled={isProcessing}
+              />
+            )}
+
             <ImageUpload
-              onImageSelect={(file) => handleImageSelect(file, mode, intensity)}
+              onImageSelect={(file) => handleImageSelect(file, mode, intensity, modelFamily)}
               disabled={isProcessing}
               label="Upload book page"
               description="Any subject — full page or cropped question"

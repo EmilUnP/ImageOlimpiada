@@ -5,13 +5,11 @@ import {
   classifyAiError,
   getPreferredVisionModels,
   getDefaultVisionModel,
+  resolveModelFamily,
+  resolveAiProvider,
 } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { TEXTBOOK_OCR_PROMPT } from '../server/lib/textbook-prompts.js';
-
-const AVAILABLE_MODELS = getPreferredVisionModels();
-
-const FALLBACK_MODELS = getPreferredVisionModels();
 
 const GENERATION_CONFIG = {
   temperature: 0.1,
@@ -120,7 +118,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { image, model: requestedModel } = req.body ?? {};
+    const { image, model: requestedModel, modelFamily } = req.body ?? {};
 
     if (!image || typeof image !== 'string') {
       res.status(400).json({ error: 'No image provided' });
@@ -144,8 +142,13 @@ export default async function handler(req, res) {
       return;
     }
 
+    const family = resolveModelFamily(modelFamily);
+    const provider = resolveAiProvider();
+    const visionModels = getPreferredVisionModels(family, provider);
     const preferredModel =
-      requestedModel && AVAILABLE_MODELS.includes(requestedModel) ? requestedModel : getDefaultVisionModel();
+      requestedModel && visionModels.includes(requestedModel)
+        ? requestedModel
+        : getDefaultVisionModel(provider, family);
 
     const genAI = createGenerativeAI();
     const triedModels = new Set();
@@ -156,7 +159,7 @@ export default async function handler(req, res) {
     const mimeType = extractMimeType(image);
     const base64Data = extractBase64Data(image);
 
-    const modelsToTry = [preferredModel, ...FALLBACK_MODELS.filter((model) => model !== preferredModel)];
+    const modelsToTry = [preferredModel, ...visionModels.filter((model) => model !== preferredModel)];
 
     for (const modelName of modelsToTry) {
       if (triedModels.has(modelName)) continue;

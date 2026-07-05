@@ -1,5 +1,5 @@
 import '../server/load-env.js';
-import { validateAiConfig, classifyAiError } from '../server/lib/ai-provider.js';
+import { validateAiConfig, classifyAiError, resolveModelFamily } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { renderTranslatedImage } from '../server/lib/translate-image-render.js';
 import { getLanguageName, normaliseTextPairs } from '../server/lib/normalise-text-pairs.js';
@@ -31,6 +31,7 @@ export default async function handler(req, res) {
       translatedTexts,
       correctedTexts,
       quality = 'premium',
+      modelFamily,
     } = req.body ?? {};
 
     if (!image || typeof image !== 'string') {
@@ -74,6 +75,7 @@ export default async function handler(req, res) {
         targetLangName,
         quality,
         correctedTexts,
+        modelFamily: resolveModelFamily(modelFamily),
       });
 
       if (result.method !== 'ai-image' || !result.translatedImage) {
