@@ -1,31 +1,37 @@
-export const TEXTBOOK_OCR_PROMPT = `You are an expert OCR specialist for old scanned textbook and exam pages (math, physics, chemistry, history).
+export const EXAM_CORPUS_CONTEXT = `CORPUS CONTEXT:
+- Batch of ~12,000+ old Russian (Cyrillic) exam scans from many subjects and exam sections
+- Each image may differ in subject, layout, quality, and size — handle each independently by visible content
+- Goal: faithful preservation for downstream OCR and translation, not interpretation or solving`;
 
-The image is typically a scan from an old Russian (Cyrillic) book with exam questions, diagrams, formulas, and tables.
+export const TEXTBOOK_OCR_PROMPT = `You are an expert OCR specialist for a large archive of old scanned exam and textbook material.
 
-DETECT ALL READABLE TEXT:
-- Question numbers (1., 2., №3, Задача, Вопрос)
-- Question stems and answer instructions
-- Multiple-choice options (A, B, C, D or а, б, в, г)
-- Paragraphs, captions, footnotes, and labels
-- Cyrillic (Russian) text with full accuracy
-- Mixed lines where words and numbers appear together
+${EXAM_CORPUS_CONTEXT}
+
+The image may be a full page or a small crop from any subject: question stem, diagram, table, graph, formula, map, or illustration fragment.
+
+DETECT ALL READABLE TEXT (any subject):
+- Question numbers, section titles, instructions (Задача, Вопрос, Выберите, Установите соответствие, etc.)
+- Numbered labels on diagrams, maps, charts, and figures
+- Callout labels, captions, footnotes, and table headers/cells
+- Graph axis labels, tick values, and unit abbreviations (Latin or Cyrillic)
+- Multiple-choice options (A/B/C/D or а/б/в/г)
+- Names, dates, places, terms, and sentences in any academic field
+- Short formula or unit snippets when they contain readable characters
 
 PRESERVE EXACTLY AS WRITTEN:
-- Mathematical expressions and symbols (+ − × ÷ = ≠ ≤ ≥ √ ∫ ∑ π ° %)
-- Subscripts, superscripts, fractions, and equation layout hints
-- Chemical formulas (H₂O, CO₂, NaCl) and reaction arrows
-- Physics units (m/s, km/h, N, J, W, V, A, kg)
-- Variables (x, y, v, t, F, m) and numeric values
-- Do NOT solve questions, fix grammar, or modernize wording
+- All notation: math symbols, chemistry formulas, units, variables, subscripts, superscripts, fractions
+- Numbers, punctuation, and original spelling — even if faded or unclear
+- Do NOT solve, complete, guess missing parts, fix grammar, or modernize wording
+- If text is illegible, omit that block rather than inventing content
 
 GROUPING:
-- One text block per logical unit (question title, sub-question, option line, caption)
+- One block per logical unit (label, cell, option, caption, formula line, paragraph fragment)
 - Reading order: top to bottom, left to right
-- Keep answer choices as separate blocks when possible
+- Diagram-only images: one block per visible label or number
 
 For each block return:
 - "text": exact content as seen
-- "confidence": 0.0–1.0
+- "confidence": 0.0–1.0 (lower when uncertain)
 - "boundingBox": {x, y, width, height} in pixels when possible
 
 Return ONLY valid JSON array:
@@ -35,21 +41,24 @@ Return ONLY valid JSON array:
 
 No markdown. No explanations. Omit boundingBox if unknown.`;
 
-export const ACADEMIC_TRANSLATION_RULES = `ACADEMIC / TEXTBOOK RULES:
-- Source material is usually Russian exam or textbook content
-- Translate natural language to the target language with correct academic terminology
-- Preserve question meaning exactly; do not simplify or solve
-- KEEP UNCHANGED: pure numbers, formulas, equations, chemical notation, units, variables, symbols, graphs, diagrams, tables, geometry figures
-- KEEP UNCHANGED: option letters (A/B/C/D) unless translating the option text after the letter
-- Preserve question numbering and exam formatting
-- Use clear, clean, student-friendly language in the target language`;
+export const ACADEMIC_TRANSLATION_RULES = `ACADEMIC / EXAM CORPUS RULES:
+${EXAM_CORPUS_CONTEXT}
+
+- Translate natural language to the target language with correct terminology for whatever subject is visible
+- Preserve meaning exactly; do not simplify, summarize, or solve
+- KEEP UNCHANGED: numbers, formulas, equations, symbols, variables, units, dates used as data
+- KEEP UNCHANGED: numbered diagram labels when they are digits only (1, 2, 3…)
+- KEEP UNCHANGED: all non-text visuals — diagrams, graphs, tables, maps, photos, geometry, line art
+- KEEP UNCHANGED: option letters (A/B/C/D) unless translating the text after the letter
+- Translate readable labels, questions, and instructions; keep layout and leader lines intact
+- Use clear academic language appropriate to the target language`;
 
 export const buildAcademicTextTranslationPrompt = (items, targetLanguageName) => {
   const lines = items
     .map((item, idx) => `${idx + 1}. "${item.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, ' ').trim()}"`)
     .join('\n');
 
-  return `You are a professional academic translator specializing in math, physics, chemistry, and history textbook material.
+  return `You are a professional academic translator for a large archive of old exam material (all subjects).
 
 Translate the following text blocks to ${targetLanguageName}.
 
@@ -97,9 +106,12 @@ export const buildTextbookImageTranslationPrompt = ({
   preserveFormatting = true,
   enhanceReadability = true,
 }) => {
-  let prompt = `You are an expert at cleaning and translating old scanned textbook / exam question images.
+  let prompt = `You are an expert at cleaning and translating old scanned exam images from a large multi-subject archive.
 
-CONTEXT: The image is from an old Russian book (math, physics, chemistry, history). It may contain Cyrillic text, formulas, diagrams, graphs, tables, and geometric figures.
+${EXAM_CORPUS_CONTEXT}
+
+The image may be any exam section from any subject — full page or small crop.
+It may mix Cyrillic text with formulas, diagrams, tables, graphs, maps, or photos.
 
 TASK: Replace text using the provided translations and return ONE clean image.
 
@@ -129,8 +141,9 @@ ${ACADEMIC_TRANSLATION_RULES}
   }
 
   prompt += `VISUAL RULES:\n`;
-  prompt += `- Preserve ALL diagrams, graphs, geometric figures, tables, charts, and formula layouts exactly\n`;
-  prompt += `- Do NOT redraw, crop, or alter non-text content\n`;
+  prompt += `- Preserve ALL line art, diagrams, graphs, tables, Venn figures, apparatus drawings, and formula layouts exactly\n`;
+  prompt += `- Preserve numbered labels, arrows, leader lines, grid lines, axis ticks, and curve shapes\n`;
+  prompt += `- Do NOT redraw, crop, simplify, or alter non-text content\n`;
   prompt += `- Clean page background; keep a readable exam-question layout\n`;
   prompt += `- ${QUALITY_INSTRUCTIONS[quality] || QUALITY_INSTRUCTIONS.premium}\n`;
   prompt += `- ${FONT_INSTRUCTIONS[fontMatching] || FONT_INSTRUCTIONS.auto}\n`;

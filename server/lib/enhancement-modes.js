@@ -28,17 +28,29 @@ const INTENSITY_MODIFIERS = {
 
 export const enhancementPrompts = {
   textbook: {
-    prompt: `MODE: Old Textbook / Exam Question Scan
-- Typical content: Russian Cyrillic exam questions from math, physics, chemistry, history
-- Restore yellowed, faded, or low-quality book page scans
-- Sharpen question text, numbering, and answer options (A/B/C/D)
-- Preserve mathematical formulas, equations, symbols, subscripts, superscripts, and fractions exactly
-- Preserve chemical formulas, physics units, graphs, diagrams, tables, and geometry figures exactly
-- Remove scanner noise, stains, shadows, fold lines, and uneven lighting
-- Straighten mild page skew; produce a clean white or light-neutral background
-- Do NOT rewrite, solve, or change any question content
-- Result: a clean modern scan of the same exam page, ready for translation`,
-    description: "Old book questions — math, physics, chemistry, history",
+    prompt: `MODE: Old Textbook / Exam Scan (any subject, any section)
+- Large mixed corpus: thousands of scans from different exam parts, subjects, and page layouts
+- Subjects may include math, physics, chemistry, biology, history, geography, literature, languages, and more — treat every image by what you SEE, not by assumed subject
+- Content may be a full page, half page, or small crop (table, formula, graph, diagram, photo insert, map, timeline)
+
+TEXT & NOTATION (preserve exactly):
+- All Cyrillic text: questions, instructions, captions, table cells, axis labels, footnotes
+- Mathematical and scientific notation: equations, fractions, units (Latin or Cyrillic), Greek letters, subscripts, superscripts, variables
+- Question numbers, section headers, numbered diagram labels, and answer options (A/B/C/D or а/б/в/г)
+- Dates, names, place names, and terminology in any academic field
+
+FIGURES & LAYOUT (preserve exactly — do NOT redraw, simplify, or invent):
+- Any diagram type: apparatus, anatomy, maps, charts, geometry, Venn/concept maps, timelines, microscopy, illustrations
+- Tables, graphs, coordinate plots, geometric figures, and embedded photos
+- Leader lines, arrows, numbering, grid lines, stamps, and original page structure
+
+SCAN CLEANUP (apply consistently across all subjects):
+- Sharpen text and thin lines without thickening strokes or adding detail that is not in the original
+- Remove noise, stains, shadows, fold lines, yellowing, and uneven lighting
+- Straighten mild skew; clean white or light-neutral background
+- Do NOT rewrite, translate, solve, or change any content
+- Result: same exam material, cleaner and sharper — safe for bulk OCR and translation pipelines`,
+    description: "Default for exam scans — all subjects, full pages or crops",
   },
   document: {
     prompt: `MODE: Document / Scan

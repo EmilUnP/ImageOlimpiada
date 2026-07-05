@@ -9,6 +9,10 @@ import { fileURLToPath } from 'url';
 import { put, list, del } from '@vercel/blob';
 import {
   createGenerativeAI,
+  generateWithProviderFallback,
+  GEMINI_VISION_MODELS,
+  getDefaultVisionModel,
+  isModelNotFoundError,
   validateAiConfig,
   classifyAiError,
   resolveAiProvider,
@@ -610,12 +614,7 @@ app.post('/api/enhance-image', async (req, res) => {
     const validMode = enhancementPrompts[mode] ? mode : 'photo';
     const prompt = buildEnhancementPrompt(validMode, intensity);
 
-    // Initialize Google Generative AI
-    const genAI = createGenerativeAI();
-    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
-
     try {
-      // Determine MIME type from base64 string
       let mimeType = "image/jpeg";
       if (image.includes('data:image/')) {
         const mimeMatch = image.match(/data:image\/([^;]+)/);
@@ -623,12 +622,14 @@ app.post('/api/enhance-image', async (req, res) => {
           mimeType = `image/${mimeMatch[1]}`;
         }
       }
-      
+
       const base64Data = image.split(',')[1] || image;
-      const result = await model.generateContent([
-        prompt,
-        { inlineData: { data: base64Data, mimeType } }
-      ]);
+      const result = await generateWithProviderFallback({
+        parts: [
+          prompt,
+          { inlineData: { data: base64Data, mimeType } },
+        ],
+      });
 
       const response = await result.response;
       
@@ -704,16 +705,12 @@ app.post('/api/detect-text', async (req, res) => {
       return res.status(configError.status).json(configError.body);
     }
 
-    // Model selection: Use requested model or default to best text detection model
-     const availableModels = [
-      'gemini-2.0-flash-exp',      // Best for text detection (experimental)
-      'gemini-3-pro-image-preview', // Current default
-    ];
-    
-    // Default to flash which is more stable and available
-    const modelName = requestedModel && availableModels.includes(requestedModel) 
-      ? requestedModel 
-      : 'gemini-2.0-flash-exp'; // Default to flash for better availability
+    const availableModels = GEMINI_VISION_MODELS;
+
+    const modelName =
+      requestedModel && availableModels.includes(requestedModel)
+        ? requestedModel
+        : getDefaultVisionModel();
 
     const prompt = TEXTBOOK_OCR_PROMPT;
 
@@ -760,30 +757,29 @@ app.post('/api/detect-text', async (req, res) => {
         response = await result.response;
         text = response.text();
       } catch (apiError) {
-        // If the model fails (404 or other API error), try fallback models
-        if (apiError.status === 404 || apiError.message?.includes('not found') || apiError.message?.includes('not supported')) {
-          console.warn(`Model ${actualModelName} failed with error:`, apiError.message);
-          console.log('Attempting to use fallback model: gemini-2.0-flash');
-          
-          try {
-            const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-            result = await fallbackModel.generateContent(
-              [
-                prompt,
-                { inlineData: { data: base64Data, mimeType } }
-              ],
-              { generationConfig }
-            );
-            response = await result.response;
-            text = response.text();
-            actualModelName = 'gemini-2.0-flash-exp';
-            console.log('Successfully used fallback model');
-          } catch (fallbackError) {
-            console.error('Fallback model also failed:', fallbackError);
-            throw apiError; // Throw original error
+        if (isModelNotFoundError(apiError)) {
+          console.warn(`Model ${actualModelName} failed:`, apiError.message);
+
+          for (const fallbackName of availableModels.filter((m) => m !== actualModelName)) {
+            try {
+              const fallbackModel = genAI.getGenerativeModel({ model: fallbackName });
+              result = await fallbackModel.generateContent(
+                [prompt, { inlineData: { data: base64Data, mimeType } }],
+                { generationConfig }
+              );
+              response = await result.response;
+              text = response.text();
+              actualModelName = fallbackName;
+              console.log(`Successfully used fallback model: ${fallbackName}`);
+              break;
+            } catch (fallbackError) {
+              console.warn(`Fallback ${fallbackName} failed:`, fallbackError.message);
+            }
           }
+
+          if (!text) throw apiError;
         } else {
-          throw apiError; // Re-throw if it's not a model availability error
+          throw apiError;
         }
       }
       
@@ -991,12 +987,7 @@ app.post('/api/translate-image', async (req, res) => {
       enhanceReadability,
     });
 
-    // Initialize Google Generative AI
-    const genAI = createGenerativeAI();
-    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
-
     try {
-      // Determine MIME type from base64 string
       let mimeType = "image/jpeg";
       if (image.includes('data:image/')) {
         const mimeMatch = image.match(/data:image\/([^;]+)/);
@@ -1004,12 +995,11 @@ app.post('/api/translate-image', async (req, res) => {
           mimeType = `image/${mimeMatch[1]}`;
         }
       }
-      
+
       const base64Data = image.split(',')[1] || image;
-      const result = await model.generateContent([
-        prompt,
-        { inlineData: { data: base64Data, mimeType } }
-      ]);
+      const result = await generateWithProviderFallback({
+        parts: [prompt, { inlineData: { data: base64Data, mimeType } }],
+      });
 
       const response = await result.response;
       

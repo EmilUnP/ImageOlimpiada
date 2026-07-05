@@ -2,20 +2,93 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-export const DEFAULT_IMAGE_MODEL = 'gemini-3-pro-image-preview';
+const OPENROUTER_DEFAULT_IMAGE_MODEL =
+  process.env.IMAGE_MODEL || 'gemini-2.5-flash-image-preview';
+
+/**
+ * Google AI Studio — image IN + image OUT (enhance / translate image).
+ * Verified via ListModels API (Nano Banana family).
+ */
+export const GEMINI_IMAGE_MODELS = [
+  'gemini-2.5-flash-image',           // Nano Banana — stable default
+  'gemini-3.1-flash-image',           // Nano Banana 2
+  'gemini-3.1-flash-lite-image',      // Nano Banana 2 Lite — cheaper
+  'gemini-3-pro-image',               // Nano Banana Pro
+  'gemini-3-pro-image-preview',
+  'gemini-3.1-flash-image-preview',
+];
+
+/**
+ * Google AI Studio — image IN + text OUT (OCR, text translation).
+ * Multimodal flash models; NOT image-generation models.
+ */
+export const GEMINI_VISION_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-001',
+  'gemini-flash-latest',
+  'gemini-2.5-flash-lite',
+];
+
+/** OpenRouter-only names → Google direct API equivalents */
+const OPENROUTER_TO_GEMINI_DIRECT = {
+  'gemini-2.5-flash-image-preview': 'gemini-2.5-flash-image',
+};
+
+export const normalizeDirectImageModel = (modelName) =>
+  OPENROUTER_TO_GEMINI_DIRECT[modelName] || modelName;
+
+export const getDefaultImageModel = (provider = resolveAiProvider()) =>
+  provider === 'openrouter'
+    ? OPENROUTER_DEFAULT_IMAGE_MODEL
+    : process.env.GEMINI_IMAGE_MODEL || GEMINI_IMAGE_MODELS[0];
+
+export const getDefaultVisionModel = () =>
+  process.env.GEMINI_VISION_MODEL || GEMINI_VISION_MODELS[0];
+
+/** @deprecated use getDefaultImageModel() */
+export const DEFAULT_IMAGE_MODEL = GEMINI_IMAGE_MODELS[0];
+
+/** OpenRouter defaults to 32768 max_tokens — too expensive for image output */
+const OPENROUTER_IMAGE_MAX_TOKENS = 4096;
 
 const OPENROUTER_MODEL_MAP = {
+  'gemini-2.5-flash-image': 'google/gemini-2.5-flash-image-preview',
   'gemini-3-pro-image-preview': 'google/gemini-3-pro-image-preview',
+  'gemini-3-pro-image': 'google/gemini-3-pro-image-preview',
+  'gemini-3.1-flash-image': 'google/gemini-3.1-flash-image-preview',
+  'gemini-3.1-flash-image-preview': 'google/gemini-3.1-flash-image-preview',
   'gemini-2.5-flash-image-preview': 'google/gemini-2.5-flash-image-preview',
-  'gemini-2.0-flash-exp': 'google/gemini-2.0-flash-exp',
   'gemini-2.0-flash': 'google/gemini-2.0-flash',
   'gemini-2.5-flash': 'google/gemini-2.5-flash',
-  'gemini-1.5-flash': 'google/gemini-1.5-flash',
 };
 
 const isPlaceholderKey = (key) => !key || key === 'your_api_key_here';
 
-const isOpenRouterKey = (key) => typeof key === 'string' && key.startsWith('sk-or-');
+const isGoogleAiStudioKey = (key) => typeof key === 'string' && key.startsWith('AIza');
+
+const getImageModelsForProvider = (provider, explicitModel) => {
+  if (explicitModel) {
+    if (provider === 'gemini') {
+      const normalized = normalizeDirectImageModel(explicitModel);
+      if (normalized !== explicitModel) {
+        return [...new Set([normalized, process.env.GEMINI_IMAGE_MODEL, ...GEMINI_IMAGE_MODELS].filter(Boolean))];
+      }
+    }
+    return [explicitModel];
+  }
+
+  if (provider === 'openrouter') {
+    return [OPENROUTER_DEFAULT_IMAGE_MODEL];
+  }
+
+  const fromEnv = process.env.GEMINI_IMAGE_MODEL;
+  return [...new Set([fromEnv, ...GEMINI_IMAGE_MODELS].filter(Boolean))];
+};
+
+export const isModelNotFoundError = (error) =>
+  error?.status === 404 ||
+  /not found for API|not supported for generateContent|is not found/i.test(error?.message || '');
 
 export const resolveAiProvider = () => {
   const explicit = process.env.AI_PROVIDER?.toLowerCase();
@@ -59,6 +132,8 @@ export const resolveAiProvider = () => {
   return 'gemini';
 };
 
+const isOpenRouterKey = (key) => typeof key === 'string' && key.startsWith('sk-or-');
+
 export const getAiApiKey = (provider = resolveAiProvider()) => {
   if (provider === 'openrouter') {
     const openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -90,6 +165,17 @@ export const validateAiConfig = () => {
           provider === 'openrouter'
             ? 'Get your API key from https://openrouter.ai/keys — do not use a Google Gemini key with OpenRouter'
             : 'Get your API key from https://aistudio.google.com/app/apikey and add it to environment variables',
+      },
+    };
+  }
+
+  if (provider === 'gemini' && !isOpenRouterKey(apiKey) && !isGoogleAiStudioKey(apiKey)) {
+    return {
+      status: 500,
+      body: {
+        error: 'GEMINI_API_KEY is not a valid Google AI Studio key.',
+        instructions:
+          'Create a free key at https://aistudio.google.com/app/apikey — it must start with AIza. Keys starting with AQ. or sk-or- are for other services and will not work here.',
       },
     };
   }
@@ -184,6 +270,9 @@ class OpenRouterModel {
 
     if (this.modelName.includes('image')) {
       body.modalities = ['image', 'text'];
+      if (body.max_tokens === undefined) {
+        body.max_tokens = OPENROUTER_IMAGE_MAX_TOKENS;
+      }
     }
 
     const response = await fetch(OPENROUTER_API_URL, {
@@ -222,8 +311,7 @@ class OpenRouterClient {
   }
 }
 
-export const createGenerativeAI = () => {
-  const provider = resolveAiProvider();
+export const createGenerativeAI = (provider = resolveAiProvider()) => {
   const apiKey = getAiApiKey(provider);
 
   if (provider === 'openrouter') {
@@ -233,6 +321,72 @@ export const createGenerativeAI = () => {
 
   console.log('[ai-provider] Using Google Gemini directly');
   return new GoogleGenerativeAI(apiKey);
+};
+
+const isRetryableProviderError = (error) => {
+  const message = error?.message || '';
+  return (
+    [401, 402, 429].includes(error?.status) ||
+    /credits|afford|quota|rate limit|billing|payment/i.test(message)
+  );
+};
+
+/** Try primary provider, then fall back; try multiple image models per provider on 404 */
+export async function generateWithProviderFallback({ model, parts, generationConfig = {} }) {
+  const primary = resolveAiProvider();
+  const alternate = primary === 'openrouter' ? 'gemini' : 'openrouter';
+  const providers = [primary];
+  if (getAiApiKey(alternate)) providers.push(alternate);
+
+  const config = { maxOutputTokens: OPENROUTER_IMAGE_MAX_TOKENS, ...generationConfig };
+  let lastError;
+
+  for (let pi = 0; pi < providers.length; pi++) {
+    const provider = providers[pi];
+    const apiKey = getAiApiKey(provider);
+    if (!apiKey) continue;
+
+    const models = getImageModelsForProvider(provider, model);
+
+    for (let mi = 0; mi < models.length; mi++) {
+      const modelName = models[mi];
+
+      try {
+        if (pi > 0 && mi === 0) {
+          console.warn(`[ai-provider] Retrying with ${provider} after ${primary} failed`);
+        } else if (mi > 0) {
+          console.warn(`[ai-provider] Trying model ${modelName} on ${provider}`);
+        } else {
+          console.log(`[ai-provider] Using ${provider} / ${modelName}`);
+        }
+
+        const client =
+          provider === 'openrouter'
+            ? new OpenRouterClient(apiKey)
+            : new GoogleGenerativeAI(apiKey);
+        const genModel = client.getGenerativeModel({ model: modelName });
+        return await genModel.generateContent(parts, { generationConfig: config });
+      } catch (error) {
+        lastError = error;
+        const hasMoreModels = mi < models.length - 1;
+        const hasMoreProviders = pi < providers.length - 1;
+
+        if (isModelNotFoundError(error) && hasMoreModels) {
+          console.warn(`[ai-provider] Model ${modelName} not available: ${error.message}`);
+          continue;
+        }
+
+        if (isRetryableProviderError(error) && hasMoreProviders) {
+          console.warn(`[ai-provider] ${provider} error (${error.status || '?'}): ${error.message}`);
+          break;
+        }
+
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error('No AI provider available');
 };
 
 export const classifyAiError = (error) => {
@@ -253,6 +407,23 @@ export const classifyAiError = (error) => {
   }
 
   if (
+    error?.status === 402 ||
+    message.toLowerCase().includes('credits') ||
+    message.toLowerCase().includes('afford') ||
+    message.toLowerCase().includes('billing') ||
+    message.toLowerCase().includes('payment required')
+  ) {
+    return {
+      status: 402,
+      message:
+        provider === 'openrouter'
+          ? 'OpenRouter credits too low for image generation. Add credits at openrouter.ai/settings/credits, or set AI_PROVIDER=gemini in .env to use your Google API key directly.'
+          : 'AI billing or quota limit reached. Check your API plan and credits.',
+      details: message,
+    };
+  }
+
+  if (
     error?.status === 429 ||
     message.includes('429') ||
     message.toLowerCase().includes('quota') ||
@@ -262,6 +433,17 @@ export const classifyAiError = (error) => {
       status: 429,
       message: 'API quota exceeded. You have used up your free tier limit.',
       retryAfter: '42 seconds',
+    };
+  }
+
+  if (isModelNotFoundError(error)) {
+    return {
+      status: 404,
+      message:
+        provider === 'gemini'
+          ? `Image model not available. Set GEMINI_IMAGE_MODEL=gemini-2.5-flash-image in .env (see ListModels for your account).`
+          : 'Image model not available. Check IMAGE_MODEL in .env or OpenRouter model list.',
+      details: message,
     };
   }
 

@@ -1,7 +1,7 @@
 const MAX_ITEMS_PER_BATCH = 6;
 const MAX_CHARS_PER_BATCH = 1800;
 
-import { resolveAiProvider } from './ai-provider.js';
+import { resolveAiProvider, GEMINI_VISION_MODELS } from './ai-provider.js';
 import { buildAcademicTextTranslationPrompt } from './textbook-prompts.js';
 
 export class TranslationServiceError extends Error {
@@ -208,12 +208,7 @@ export const performTranslations = async ({ genAI, items, targetLanguageName }) 
     maxOutputTokens: 2048,
   };
 
-  const preferredModels = [
-    'gemini-2.0-flash-exp',
-    'gemini-2.0-flash',
-    'gemini-2.5-flash',
-    'gemini-3-pro-image-preview',
-  ];
+  const preferredModels = GEMINI_VISION_MODELS;
 
   let lastError;
 

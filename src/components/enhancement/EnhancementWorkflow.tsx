@@ -55,7 +55,7 @@ export const EnhancementWorkflow = () => {
               onImageSelect={(file) => handleImageSelect(file, mode, intensity)}
               disabled={isProcessing}
               label="Upload book page"
-              description="Scanned question from math, physics, chemistry, or history"
+              description="Scanned exam material — any subject, ~12k image archive"
             />
           </div>
 

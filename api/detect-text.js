@@ -1,18 +1,16 @@
-import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
+import {
+  createGenerativeAI,
+  validateAiConfig,
+  classifyAiError,
+  GEMINI_VISION_MODELS,
+  getDefaultVisionModel,
+} from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { TEXTBOOK_OCR_PROMPT } from '../server/lib/textbook-prompts.js';
 
-const AVAILABLE_MODELS = [
-  'gemini-2.0-flash-exp',
-  'gemini-3-pro-image-preview',
-  'gemini-2.0-flash',
-];
+const AVAILABLE_MODELS = GEMINI_VISION_MODELS;
 
-const FALLBACK_MODELS = [
-  'gemini-2.0-flash-exp',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-];
+const FALLBACK_MODELS = GEMINI_VISION_MODELS;
 
 const GENERATION_CONFIG = {
   temperature: 0.1,
@@ -146,7 +144,7 @@ export default async function handler(req, res) {
     }
 
     const preferredModel =
-      requestedModel && AVAILABLE_MODELS.includes(requestedModel) ? requestedModel : AVAILABLE_MODELS[0];
+      requestedModel && AVAILABLE_MODELS.includes(requestedModel) ? requestedModel : getDefaultVisionModel();
 
     const genAI = createGenerativeAI();
     const triedModels = new Set();

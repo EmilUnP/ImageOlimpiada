@@ -1,5 +1,5 @@
 import { saveUploadedImage } from './lib/blob-storage.js';
-import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
+import { generateWithProviderFallback, validateAiConfig, classifyAiError } from '../server/lib/ai-provider.js';
 import { enhancementPrompts, buildEnhancementPrompt } from '../server/lib/enhancement-modes.js';
 
 export default async function handler(req, res) {
@@ -47,11 +47,7 @@ export default async function handler(req, res) {
     const validMode = enhancementPrompts[mode] ? mode : 'photo';
     const prompt = buildEnhancementPrompt(validMode, intensity);
 
-    const genAI = createGenerativeAI();
-    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
-
     try {
-      // Determine MIME type from base64 string
       let mimeType = "image/jpeg";
       if (image.includes('data:image/')) {
         const mimeMatch = image.match(/data:image\/([^;]+)/);
@@ -59,12 +55,14 @@ export default async function handler(req, res) {
           mimeType = `image/${mimeMatch[1]}`;
         }
       }
-      
+
       const base64Data = image.split(',')[1] || image;
-      const result = await model.generateContent([
-        prompt,
-        { inlineData: { data: base64Data, mimeType } }
-      ]);
+      const result = await generateWithProviderFallback({
+        parts: [
+          prompt,
+          { inlineData: { data: base64Data, mimeType } },
+        ],
+      });
 
       const response = await result.response;
       

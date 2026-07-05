@@ -1,4 +1,4 @@
-import { createGenerativeAI, validateAiConfig, classifyAiError, DEFAULT_IMAGE_MODEL } from '../server/lib/ai-provider.js';
+import { generateWithProviderFallback, validateAiConfig, classifyAiError } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { applyTextOverlaysToImage } from '../server/lib/local-image-translation.js';
 import { buildTextbookImageTranslationPrompt } from '../server/lib/textbook-prompts.js';
@@ -136,14 +136,13 @@ export default async function handler(req, res) {
       enhanceReadability,
     });
 
-    const genAI = createGenerativeAI();
-    const model = genAI.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
-
     const mimeType = extractMimeType(image);
     const base64Data = extractBase64Data(image);
 
     try {
-      const result = await model.generateContent([prompt, { inlineData: { data: base64Data, mimeType } }]);
+      const result = await generateWithProviderFallback({
+        parts: [prompt, { inlineData: { data: base64Data, mimeType } }],
+      });
       const response = await result.response;
 
       let translatedImageBase64 = null;
