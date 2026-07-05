@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
+import './load-env.js';
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,10 +14,13 @@ import {
   generateWithProviderFallback,
   GEMINI_VISION_MODELS,
   getDefaultVisionModel,
+  getDefaultImageModel,
+  getPreferredVisionModels,
   isModelNotFoundError,
   validateAiConfig,
   classifyAiError,
   resolveAiProvider,
+  logActiveModelConfig,
   DEFAULT_IMAGE_MODEL,
 } from './lib/ai-provider.js';
 import {
@@ -24,11 +28,9 @@ import {
   TranslationServiceError,
   classifyGeminiError,
 } from './lib/text-translation.js';
-import { applyTextOverlaysToImage } from './lib/local-image-translation.js';
+import { renderTranslatedImage } from './lib/translate-image-render.js';
 import { enhancementPrompts, getEnhancementModesList, buildEnhancementPrompt } from './lib/enhancement-modes.js';
-import { TEXTBOOK_OCR_PROMPT, buildTextbookImageTranslationPrompt } from './lib/textbook-prompts.js';
-
-dotenv.config();
+import { TEXTBOOK_OCR_PROMPT } from './lib/textbook-prompts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -570,6 +572,7 @@ app.post('/api/enhance-image', async (req, res) => {
 
       const base64Data = image.split(',')[1] || image;
       const result = await generateWithProviderFallback({
+        model: getDefaultImageModel(),
         parts: [
           prompt,
           { inlineData: { data: base64Data, mimeType } },
@@ -650,7 +653,8 @@ app.post('/api/detect-text', async (req, res) => {
       return res.status(configError.status).json(configError.body);
     }
 
-    const availableModels = GEMINI_VISION_MODELS;
+    const availableModels = getPreferredVisionModels();
+    const configuredVisionModel = process.env.GEMINI_VISION_MODEL?.trim();
 
     const modelName =
       requestedModel && availableModels.includes(requestedModel)
@@ -716,6 +720,11 @@ app.post('/api/detect-text', async (req, res) => {
               text = response.text();
               actualModelName = fallbackName;
               console.log(`Successfully used fallback model: ${fallbackName}`);
+              if (configuredVisionModel && fallbackName !== configuredVisionModel) {
+                console.warn(
+                  `[detect-text] ⚠️  Fell back from GEMINI_VISION_MODEL="${configuredVisionModel}" to "${fallbackName}"`
+                );
+              }
               break;
             } catch (fallbackError) {
               console.warn(`Fallback ${fallbackName} failed:`, fallbackError.message);
@@ -921,80 +930,30 @@ app.post('/api/translate-image', async (req, res) => {
       }))
       .filter((pair) => pair.original && pair.translated);
 
-    const prompt = buildTextbookImageTranslationPrompt({
-      textPairs,
-      correctedTexts,
-      targetLangName,
-      quality,
-      fontMatching,
-      textStyle,
-      preserveFormatting,
-      enhanceReadability,
-    });
-
     try {
-      let mimeType = "image/jpeg";
-      if (image.includes('data:image/')) {
-        const mimeMatch = image.match(/data:image\/([^;]+)/);
-        if (mimeMatch) {
-          mimeType = `image/${mimeMatch[1]}`;
-        }
-      }
-
-      const base64Data = image.split(',')[1] || image;
-      const result = await generateWithProviderFallback({
-        parts: [prompt, { inlineData: { data: base64Data, mimeType } }],
+      const result = await renderTranslatedImage({
+        image,
+        textPairs,
+        targetLanguage,
+        targetLangName,
+        quality,
+        fontMatching,
+        textStyle,
+        preserveFormatting,
+        enhanceReadability,
+        correctedTexts,
       });
 
-      const response = await result.response;
-      
-      // Try to get image from response
-      let translatedImageBase64 = null;
-      
-      if (response.candidates && response.candidates[0]) {
-        const parts = response.candidates[0].content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData?.data) {
-            translatedImageBase64 = part.inlineData.data;
-            break;
-          }
-        }
-      }
-      
-      // If translated image is returned, use it
-      if (!translatedImageBase64 && translatedTextPairs && translatedTextPairs.length > 0) {
-        console.warn('Gemini did not return an inline image. Falling back to local renderer.');
-        try {
-          const overlayImage = await applyTextOverlaysToImage(image, translatedTextPairs);
-          if (overlayImage) {
-            return res.json({
-              translatedImage: overlayImage,
-              message: `Applied ${translatedTextPairs.length} translations using fallback renderer.`,
-              targetLanguage: targetLangName,
-            });
-          }
-        } catch (fallbackError) {
-          console.error('Fallback translation renderer failed:', fallbackError);
-        }
-      }
-
-      if (translatedImageBase64) {
-        return res.json({
-          translatedImage: `data:${mimeType};base64,${translatedImageBase64}`,
-          message: `Image text translated successfully to ${targetLangName}.`,
-          targetLanguage: targetLangName
-        });
-      } else {
-        // Return original image with analysis
-        const text = response.text();
-        return res.json({
-          translatedImage: image,
-          analysis: text,
-          message: `Translation processed. Note: Gemini may provide analysis instead of translated images.`,
-          targetLanguage: targetLangName
-        });
-      }
-
+      return res.json({
+        translatedImage: result.translatedImage,
+        message: result.message,
+        targetLanguage: targetLangName,
+        method: result.method,
+        appliedCount: result.appliedCount,
+        skippedCount: result.skippedCount,
+        analysis: result.analysis,
+        fallback: false,
+      });
     } catch (error) {
       console.error('AI API error:', error);
       const aiError = classifyAiError(error);
@@ -1015,6 +974,7 @@ app.post('/api/translate-image', async (req, res) => {
 });
 
 app.listen(PORT, () => {
+  logActiveModelConfig();
   const provider = resolveAiProvider();
   console.log(`Backend running at http://localhost:${PORT} (${provider})`);
   console.log(`Frontend: http://localhost:8080 | Admin: http://localhost:8080/admin`);

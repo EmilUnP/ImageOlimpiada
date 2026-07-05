@@ -1,16 +1,17 @@
+import '../server/load-env.js';
 import {
   createGenerativeAI,
   validateAiConfig,
   classifyAiError,
-  GEMINI_VISION_MODELS,
+  getPreferredVisionModels,
   getDefaultVisionModel,
 } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
 import { TEXTBOOK_OCR_PROMPT } from '../server/lib/textbook-prompts.js';
 
-const AVAILABLE_MODELS = GEMINI_VISION_MODELS;
+const AVAILABLE_MODELS = getPreferredVisionModels();
 
-const FALLBACK_MODELS = GEMINI_VISION_MODELS;
+const FALLBACK_MODELS = getPreferredVisionModels();
 
 const GENERATION_CONFIG = {
   temperature: 0.1,

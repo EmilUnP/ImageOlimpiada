@@ -1,7 +1,7 @@
 const MAX_ITEMS_PER_BATCH = 6;
 const MAX_CHARS_PER_BATCH = 1800;
 
-import { resolveAiProvider, GEMINI_VISION_MODELS } from './ai-provider.js';
+import { resolveAiProvider, getPreferredVisionModels } from './ai-provider.js';
 import { buildAcademicTextTranslationPrompt } from './textbook-prompts.js';
 
 export class TranslationServiceError extends Error {
@@ -208,7 +208,8 @@ export const performTranslations = async ({ genAI, items, targetLanguageName }) 
     maxOutputTokens: 2048,
   };
 
-  const preferredModels = GEMINI_VISION_MODELS;
+  const preferredModels = getPreferredVisionModels();
+  const configuredModel = process.env.GEMINI_VISION_MODEL?.trim();
 
   let lastError;
 
@@ -224,6 +225,12 @@ export const performTranslations = async ({ genAI, items, targetLanguageName }) 
     }
 
     console.info(`[translate-text] Using Gemini model "${modelName}" for translation.`);
+
+    if (configuredModel && modelName !== configuredModel) {
+      console.warn(
+        `[translate-text] ⚠️  Fell back from configured GEMINI_VISION_MODEL="${configuredModel}" to "${modelName}"`
+      );
+    }
 
     const batches = chunkTexts(items);
     const results = {};

@@ -1,5 +1,4 @@
-import { Link } from "react-router-dom";
-import { Sparkles, Languages, Archive } from "lucide-react";
+import { Sparkles, Languages } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type AppTool = "enhance" | "translate";
@@ -27,12 +26,11 @@ const TOOLS = [
 export const ToolsSidebar = ({ selected, onSelect }: ToolsSidebarProps) => {
   return (
     <aside className="w-full lg:w-56 xl:w-60 shrink-0 border-b lg:border-b-0 lg:border-r border-border/60 bg-card/30 backdrop-blur-sm lg:sticky lg:top-[57px] lg:self-start lg:max-h-[calc(100vh-57px)] lg:overflow-y-auto">
-      <div className="p-4 lg:p-5 flex flex-col gap-4 min-h-full">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2.5 px-1">
-            Tools
-          </p>
-          <nav className="flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1">
+      <div className="p-4 lg:p-5">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2.5 px-1">
+          Tools
+        </p>
+        <nav className="flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1">
             {TOOLS.map((tool) => {
               const Icon = tool.icon;
               const isActive = selected === tool.id;
@@ -67,18 +65,7 @@ export const ToolsSidebar = ({ selected, onSelect }: ToolsSidebarProps) => {
                 </button>
               );
             })}
-          </nav>
-        </div>
-
-        <div className="hidden lg:block mt-auto pt-2 border-t border-border/40">
-          <Link
-            to="/admin"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-          >
-            <Archive className="h-3.5 w-3.5" />
-            Upload archive
-          </Link>
-        </div>
+        </nav>
       </div>
     </aside>
   );

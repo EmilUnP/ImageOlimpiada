@@ -1,24 +1,12 @@
-import { generateWithProviderFallback, validateAiConfig, classifyAiError } from '../server/lib/ai-provider.js';
+import '../server/load-env.js';
+import { validateAiConfig, classifyAiError } from '../server/lib/ai-provider.js';
 import { saveUploadedImage } from './lib/blob-storage.js';
-import { applyTextOverlaysToImage } from '../server/lib/local-image-translation.js';
-import { buildTextbookImageTranslationPrompt } from '../server/lib/textbook-prompts.js';
+import { renderTranslatedImage } from '../server/lib/translate-image-render.js';
 
 const LANGUAGE_NAMES = {
   en: 'English',
   ru: 'Russian',
   az: 'Azerbaijani',
-};
-
-const extractMimeType = (base64Image, fallback = 'image/jpeg') => {
-  if (typeof base64Image !== 'string') return fallback;
-  const match = base64Image.match(/data:image\/([^;]+);base64,/i);
-  return match ? `image/${match[1]}` : fallback;
-};
-
-const extractBase64Data = (base64Image) => {
-  if (typeof base64Image !== 'string') return '';
-  const parts = base64Image.split(',');
-  return parts.length > 1 ? parts[1] : parts[0];
 };
 
 const normaliseTextPairs = (translatedTexts = []) => {
@@ -41,11 +29,7 @@ const normaliseTextPairs = (translatedTexts = []) => {
 
       if (!original || !translated) return null;
 
-      return {
-        original,
-        translated,
-        boundingBox,
-      };
+      return { original, translated, boundingBox };
     })
     .filter(Boolean);
 };
@@ -89,6 +73,7 @@ export default async function handler(req, res) {
     }
 
     const textPairs = normaliseTextPairs(translatedTexts);
+    const targetLangName = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
 
     try {
       await saveUploadedImage(image, 'translation', {
@@ -113,83 +98,36 @@ export default async function handler(req, res) {
       return;
     }
 
-    const targetLangName = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
-    const prompt = buildTextbookImageTranslationPrompt({
-      textPairs,
-      correctedTexts,
-      targetLangName,
-      quality,
-      fontMatching,
-      textStyle,
-      preserveFormatting,
-      enhanceReadability,
-    });
-
     console.log('translate-image: Prepared translation request', {
       targetLanguage: targetLangName,
       textPairs: textPairs.length,
-      correctedTexts: Array.isArray(correctedTexts) ? correctedTexts.length : 0,
+      withBoxes: textPairs.filter((p) => p.boundingBox).length,
       quality,
-      fontMatching,
-      textStyle,
-      preserveFormatting,
-      enhanceReadability,
     });
 
-    const mimeType = extractMimeType(image);
-    const base64Data = extractBase64Data(image);
-
     try {
-      const result = await generateWithProviderFallback({
-        parts: [prompt, { inlineData: { data: base64Data, mimeType } }],
+      const result = await renderTranslatedImage({
+        image,
+        textPairs,
+        targetLanguage,
+        targetLangName,
+        quality,
+        fontMatching,
+        textStyle,
+        preserveFormatting,
+        enhanceReadability,
+        correctedTexts,
       });
-      const response = await result.response;
 
-      let translatedImageBase64 = null;
-
-      if (response.candidates && response.candidates[0]) {
-        const parts = response.candidates[0].content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData?.data) {
-            translatedImageBase64 = part.inlineData.data;
-            break;
-          }
-        }
-      }
-
-      if (!translatedImageBase64 && textPairs.length > 0) {
-        console.warn('translate-image: Gemini did not return an image. Attempting fallback overlay renderer.');
-        try {
-          const fallbackImage = await applyTextOverlaysToImage(image, textPairs);
-          if (fallbackImage) {
-            res.json({
-              translatedImage: fallbackImage,
-              message: `Applied ${textPairs.length} translation(s) using fallback renderer.`,
-              targetLanguage: targetLangName,
-              fallback: true,
-            });
-            return;
-          }
-        } catch (fallbackError) {
-          console.error('translate-image: Fallback renderer failed:', fallbackError);
-        }
-      }
-
-      if (translatedImageBase64) {
-        res.json({
-          translatedImage: `data:${mimeType};base64,${translatedImageBase64}`,
-          message: `Image text translated successfully to ${targetLangName}.`,
-          targetLanguage: targetLangName,
-        });
-        return;
-      }
-
-      const analysis = response.text();
       res.json({
-        translatedImage: image,
-        analysis,
-        message: 'Translation processed. Gemini returned analysis instead of an edited image.',
+        translatedImage: result.translatedImage,
+        message: result.message,
         targetLanguage: targetLangName,
+        method: result.method,
+        appliedCount: result.appliedCount,
+        skippedCount: result.skippedCount,
+        analysis: result.analysis,
+        fallback: false,
       });
     } catch (error) {
       console.error('translate-image: AI API error:', error);

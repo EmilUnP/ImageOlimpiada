@@ -127,7 +127,11 @@ export const useImageTranslation = () => {
       if (data?.translatedImage) {
         setTranslatedImage(data.translatedImage);
         const langName = data.targetLanguage || targetLanguage;
-        toast.success(`Image text translated successfully to ${langName}!`);
+        if (data.method === 'ai-image') {
+          toast.success(`Text replaced on image (${langName})`);
+        } else {
+          toast.error(data.message || 'Could not replace text on image');
+        }
         return data.translatedImage;
       }
 

@@ -1,9 +1,15 @@
+import '../load-env.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-const OPENROUTER_DEFAULT_IMAGE_MODEL =
-  process.env.IMAGE_MODEL || 'gemini-2.5-flash-image-preview';
+const getOpenRouterDefaultImageModel = () =>
+  process.env.IMAGE_MODEL?.trim() || 'gemini-2.5-flash-image-preview';
+
+const readEnvModel = (key) => {
+  const value = process.env[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+};
 
 /**
  * Google AI Studio — image IN + image OUT (enhance / translate image).
@@ -23,6 +29,7 @@ export const GEMINI_IMAGE_MODELS = [
  * Multimodal flash models; NOT image-generation models.
  */
 export const GEMINI_VISION_MODELS = [
+  'gemini-2.5-pro',                   // best OCR / academic translation quality
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.0-flash-001',
@@ -40,11 +47,57 @@ export const normalizeDirectImageModel = (modelName) =>
 
 export const getDefaultImageModel = (provider = resolveAiProvider()) =>
   provider === 'openrouter'
-    ? OPENROUTER_DEFAULT_IMAGE_MODEL
-    : process.env.GEMINI_IMAGE_MODEL || GEMINI_IMAGE_MODELS[0];
+    ? getOpenRouterDefaultImageModel()
+    : readEnvModel('GEMINI_IMAGE_MODEL') || GEMINI_IMAGE_MODELS[0];
 
 export const getDefaultVisionModel = () =>
-  process.env.GEMINI_VISION_MODEL || GEMINI_VISION_MODELS[0];
+  readEnvModel('GEMINI_VISION_MODEL') || GEMINI_VISION_MODELS[0];
+
+/** Vision models to try — env model first, then fallbacks (deduped) */
+export const getPreferredVisionModels = () => {
+  const envModel = readEnvModel('GEMINI_VISION_MODEL');
+  if (envModel) {
+    return [envModel, ...GEMINI_VISION_MODELS.filter((m) => m !== envModel)];
+  }
+  return [...GEMINI_VISION_MODELS];
+};
+
+/** Image models to try — env model first, then fallbacks (deduped) */
+export const getPreferredImageModels = (explicitModel) => {
+  const envModel = readEnvModel('GEMINI_IMAGE_MODEL');
+  const primary = (explicitModel?.trim() || envModel || '').trim() || null;
+
+  if (primary) {
+    const normalized = normalizeDirectImageModel(primary);
+    return [normalized, ...GEMINI_IMAGE_MODELS.filter((m) => m !== normalized)];
+  }
+  return [...GEMINI_IMAGE_MODELS];
+};
+
+export const logActiveModelConfig = () => {
+  const provider = resolveAiProvider();
+  const vision = getPreferredVisionModels();
+  const image = getPreferredImageModels();
+  console.log('[ai-provider] ── Active model configuration ──');
+  console.log(`  Provider:        ${provider}`);
+  console.log(`  GEMINI_VISION_MODEL (env): ${readEnvModel('GEMINI_VISION_MODEL') || '(not set)'}`);
+  console.log(`  GEMINI_IMAGE_MODEL (env):  ${readEnvModel('GEMINI_IMAGE_MODEL') || '(not set)'}`);
+  console.log(`  OCR / translate chain:     ${vision.slice(0, 4).join(' → ')}`);
+  console.log(`  Image edit chain:          ${image.slice(0, 4).join(' → ')}`);
+  console.log('[ai-provider] ─────────────────────────────────');
+};
+
+/** Pick image model for translate-image based on quality tier */
+export const getImageModelForQuality = (quality = 'premium', provider = resolveAiProvider()) => {
+  const envModel = readEnvModel('GEMINI_IMAGE_MODEL');
+  if (envModel) {
+    return provider === 'gemini' ? normalizeDirectImageModel(envModel) : envModel;
+  }
+
+  if (quality === 'ultra') return 'gemini-3-pro-image';
+  if (quality === 'premium') return 'gemini-3.1-flash-image';
+  return getDefaultImageModel(provider);
+};
 
 /** @deprecated use getDefaultImageModel() */
 export const DEFAULT_IMAGE_MODEL = GEMINI_IMAGE_MODELS[0];
@@ -61,6 +114,7 @@ const OPENROUTER_MODEL_MAP = {
   'gemini-2.5-flash-image-preview': 'google/gemini-2.5-flash-image-preview',
   'gemini-2.0-flash': 'google/gemini-2.0-flash',
   'gemini-2.5-flash': 'google/gemini-2.5-flash',
+  'gemini-2.5-pro': 'google/gemini-2.5-pro',
 };
 
 const isPlaceholderKey = (key) => !key || key === 'your_api_key_here';
@@ -71,22 +125,12 @@ const isValidGeminiKey = (key) =>
   key.length > 10;
 
 const getImageModelsForProvider = (provider, explicitModel) => {
-  if (explicitModel) {
-    if (provider === 'gemini') {
-      const normalized = normalizeDirectImageModel(explicitModel);
-      if (normalized !== explicitModel) {
-        return [...new Set([normalized, process.env.GEMINI_IMAGE_MODEL, ...GEMINI_IMAGE_MODELS].filter(Boolean))];
-      }
-    }
-    return [explicitModel];
-  }
-
   if (provider === 'openrouter') {
-    return [OPENROUTER_DEFAULT_IMAGE_MODEL];
+    if (explicitModel) return [explicitModel];
+    return [getOpenRouterDefaultImageModel()];
   }
 
-  const fromEnv = process.env.GEMINI_IMAGE_MODEL;
-  return [...new Set([fromEnv, ...GEMINI_IMAGE_MODELS].filter(Boolean))];
+  return getPreferredImageModels(explicitModel);
 };
 
 export const isModelNotFoundError = (error) =>
@@ -347,6 +391,9 @@ const isRetryableProviderError = (error) => {
 /** Try primary provider, then fall back; try multiple image models per provider on 404 */
 export async function generateWithProviderFallback({ model, parts, generationConfig = {} }) {
   const primary = resolveAiProvider();
+  const resolvedModel = model?.trim() || getDefaultImageModel(primary);
+  const envImageModel = readEnvModel('GEMINI_IMAGE_MODEL');
+
   const alternate = primary === 'openrouter' ? 'gemini' : 'openrouter';
   const providers = [primary];
   if (getAiApiKey(alternate)) providers.push(alternate);
@@ -359,18 +406,21 @@ export async function generateWithProviderFallback({ model, parts, generationCon
     const apiKey = getAiApiKey(provider);
     if (!apiKey) continue;
 
-    const models = getImageModelsForProvider(provider, model);
+    const models = getImageModelsForProvider(provider, resolvedModel);
 
     for (let mi = 0; mi < models.length; mi++) {
       const modelName = models[mi];
+      const fromEnv = envImageModel && modelName === normalizeDirectImageModel(envImageModel);
 
       try {
         if (pi > 0 && mi === 0) {
           console.warn(`[ai-provider] Retrying with ${provider} after ${primary} failed`);
         } else if (mi > 0) {
-          console.warn(`[ai-provider] Trying model ${modelName} on ${provider}`);
+          console.warn(`[ai-provider] Trying fallback model ${modelName} on ${provider}`);
         } else {
-          console.log(`[ai-provider] Using ${provider} / ${modelName}`);
+          console.log(
+            `[ai-provider] Using ${provider} / ${modelName}${fromEnv ? ' (GEMINI_IMAGE_MODEL from .env)' : model ? '' : ' (default chain)'}`
+          );
         }
 
         const client =

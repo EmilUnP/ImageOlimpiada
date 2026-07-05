@@ -76,86 +76,46 @@ ${lines}
 Return ONLY: ["translation1", "translation2", "..."]`;
 };
 
-const QUALITY_INSTRUCTIONS = {
-  standard: 'Accurate translation with clean text rendering.',
-  premium:
-    'Highly accurate academic translation with crisp text, precise placement, and clean readable layout on the page.',
-  ultra:
-    'Maximum accuracy with pixel-clean text rendering and perfect integration into the scanned page.',
-};
-
-const FONT_INSTRUCTIONS = {
-  auto: 'Use a clean serif or sans-serif font similar to textbook print, suitable for the target language.',
-  preserve: 'Match the original printed textbook style as closely as possible.',
-  native: 'Use natural textbook typography for the target language.',
-};
-
-const STYLE_INSTRUCTIONS = {
-  exact: 'Preserve original text size, weight, and placement exactly.',
-  natural: 'Make text natural in the target language while keeping exam layout.',
-  adaptive: 'Balance readable target-language text with original exam layout.',
-};
-
-export const buildTextbookImageTranslationPrompt = ({
+export const buildImageTextReplacementPrompt = ({
   textPairs = [],
   correctedTexts = [],
-  targetLangName,
-  quality = 'premium',
-  fontMatching = 'auto',
-  textStyle = 'adaptive',
-  preserveFormatting = true,
-  enhanceReadability = true,
+  targetLangName = 'English',
 }) => {
-  let prompt = `You are an expert at cleaning and translating old scanned exam images from a large multi-subject archive.
+  let prompt = `You are editing a scanned textbook or exam image. Your job is IN-PLACE TEXT REPLACEMENT — like Photoshop, not adding labels.
 
-${EXAM_CORPUS_CONTEXT}
+TASK: Replace every listed original text with the exact ${targetLangName} translation. Keep the image identical except for those text changes.
 
-The image may be any exam section from any subject — full page or small crop.
-It may mix Cyrillic text with formulas, diagrams, tables, graphs, maps, or photos.
+FOR EACH REPLACEMENT:
+1. Completely remove the original text (inpaint the paper/background behind it)
+2. Write the replacement string in the exact same position
+3. Match original typography: font size, weight, alignment, ink color, serif/sans-serif style
+4. Do not cover, erase, or alter diagram lines, arrows, leader lines, or drawings
 
-TASK: Replace text using the provided translations and return ONE clean image.
-
-${ACADEMIC_TRANSLATION_RULES}
-
+STRICT RULES:
+- Use the replacement strings EXACTLY as given — do not re-translate or change spelling
+- Never show both the original and translated text
+- Never add rectangles, boxes, stickers, highlights, or colored patches behind text
+- Never add new callout labels, floating captions, or text in empty areas
+- Never move text to a different location on the image
+- Keep image size, crop, and all non-text content unchanged
 `;
 
   if (textPairs.length > 0) {
-    prompt += `TEXT REPLACEMENT PAIRS (follow exactly):\n\n`;
-    textPairs.forEach((pair, index) => {
-      prompt += `${index + 1}. Find: "${pair.original}"\n`;
-      prompt += `   Replace with: "${pair.translated}"\n`;
-      if (pair.boundingBox) {
-        prompt += `   Approx. box: x=${Math.round(pair.boundingBox.x)}, y=${Math.round(pair.boundingBox.y)}, w=${Math.round(pair.boundingBox.width)}, h=${Math.round(pair.boundingBox.height)}\n`;
-      }
-      prompt += `   Keep same position, size, alignment, and print style.\n\n`;
+    prompt += `\nREPLACEMENTS (copy each "→" string exactly):\n`;
+    textPairs.forEach((pair, i) => {
+      prompt += `${i + 1}. "${pair.original}" → "${pair.translated}"\n`;
     });
-    prompt += `Replace ONLY the listed text. Do not change any other content.\n\n`;
-  } else if (Array.isArray(correctedTexts) && correctedTexts.length > 0) {
-    prompt += `Translate these verified text blocks to ${targetLangName}:\n`;
+  } else if (correctedTexts.length > 0) {
+    prompt += `\nTranslate these text blocks to ${targetLangName} in place:\n`;
     correctedTexts.forEach((text, i) => {
       prompt += `${i + 1}. "${text}"\n`;
     });
-    prompt += `\n`;
-  } else {
-    prompt += `Detect all natural-language text and translate to ${targetLangName}. Leave formulas and diagrams unchanged.\n\n`;
   }
 
-  prompt += `VISUAL RULES:\n`;
-  prompt += `- Preserve ALL line art, diagrams, graphs, tables, Venn figures, apparatus drawings, and formula layouts exactly\n`;
-  prompt += `- Preserve numbered labels, arrows, leader lines, grid lines, axis ticks, and curve shapes\n`;
-  prompt += `- Do NOT redraw, crop, simplify, or alter non-text content\n`;
-  prompt += `- Clean page background; keep a readable exam-question layout\n`;
-  prompt += `- ${QUALITY_INSTRUCTIONS[quality] || QUALITY_INSTRUCTIONS.premium}\n`;
-  prompt += `- ${FONT_INSTRUCTIONS[fontMatching] || FONT_INSTRUCTIONS.auto}\n`;
-  prompt += `- ${STYLE_INSTRUCTIONS[textStyle] || STYLE_INSTRUCTIONS.adaptive}\n`;
-  if (preserveFormatting) {
-    prompt += `- Preserve bold, italic, underline, numbering, and option structure\n`;
-  }
-  if (enhanceReadability) {
-    prompt += `- Make translated text crisp and easy to read on the page\n`;
-  }
-
-  prompt += `\nOUTPUT: Return ONLY the translated image. Same question content, cleaner and translated to ${targetLangName}.`;
+  prompt += `\nReturn ONLY the edited image.`;
 
   return prompt;
 };
+
+/** @deprecated use buildImageTextReplacementPrompt */
+export const buildTextbookImageTranslationPrompt = buildImageTextReplacementPrompt;

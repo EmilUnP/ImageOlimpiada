@@ -236,32 +236,32 @@ export const TextDetectionAndTranslation = ({
         </CardContent>
       </Card>
 
-      {/* Translate Button - Prominent placement */}
+      {/* Translate CTA */}
       {!hasTranslated && originalTexts.length > 0 && (
-        <Card className="border-2 border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-accent/5 shadow-md">
-          <CardContent className="p-8">
-            <div className="flex flex-col items-center justify-center gap-5">
-              <div className="text-center space-y-2">
-                <h3 className="text-xl md:text-2xl font-bold tracking-tight">Ready to Translate?</h3>
-                <p className="text-base text-muted-foreground max-w-md">
-                  Review the detected text below, then click the button to translate all text to <span className="font-semibold text-foreground">{targetLanguageName}</span>
+        <Card className="border-border/60 shadow-sm">
+          <CardContent className="p-4 md:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold tracking-tight">Ready to translate</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Review the text blocks below, then translate to {targetLanguageName}.
                 </p>
               </div>
               <Button
                 onClick={handleTranslate}
-                size="lg"
-                className="gap-2.5 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-white font-semibold shadow-md hover:shadow-glow-accent transition-all duration-300 min-w-[280px] h-12 md:h-14 text-base md:text-lg rounded-xl"
+                size="sm"
+                className="shrink-0 gap-2 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-white font-medium rounded-lg sm:ml-4"
                 disabled={isTranslating || originalTexts.length === 0}
               >
                 {isTranslating ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Translating to {targetLanguageName}...
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Translating…
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-5 h-5" />
-                    Translate All Text to {targetLanguageName}
+                    <Sparkles className="w-4 h-4" />
+                    Translate to {targetLanguageName}
                   </>
                 )}
               </Button>

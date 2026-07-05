@@ -64,6 +64,8 @@ export interface TranslateImageResponse {
   targetLanguage?: string;
   message?: string;
   analysis?: string;
+  method?: 'ai-image' | 'none';
+  appliedCount?: number;
   error?: string;
 }
 

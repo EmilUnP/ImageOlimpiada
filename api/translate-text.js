@@ -1,3 +1,4 @@
+import '../server/load-env.js';
 import { createGenerativeAI, validateAiConfig } from '../server/lib/ai-provider.js';
 import {
   createTextTranslationService,

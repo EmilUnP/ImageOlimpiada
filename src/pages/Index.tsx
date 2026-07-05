@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { ToolsSidebar, type AppTool } from "@/components/layout/ToolsSidebar";
 import { EnhancementWorkflow } from "@/components/enhancement/EnhancementWorkflow";
 import { TranslationWorkflow } from "@/components/translation/TranslationWorkflow";
-import { Button } from "@/components/ui/button";
-import { Image as ImageIcon, Archive } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 
 const Index = () => {
   const [selectedTool, setSelectedTool] = useState<AppTool>("enhance");
@@ -12,8 +10,7 @@ const Index = () => {
   return (
     <div className="min-h-screen app-shell">
       <header className="sticky top-0 z-40 border-b border-border/60 bg-card/40 backdrop-blur-md">
-        <div className="flex items-center justify-between gap-4 px-4 py-3 lg:px-6">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 px-4 py-3 lg:px-6">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
               <ImageIcon className="h-4 w-4" />
             </div>
@@ -23,13 +20,6 @@ const Index = () => {
                 Clean & translate exam book scans
               </span>
             </div>
-          </div>
-          <Button variant="ghost" size="sm" className="gap-2 shrink-0 text-muted-foreground" asChild>
-            <Link to="/admin">
-              <Archive className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Archive</span>
-            </Link>
-          </Button>
         </div>
       </header>
 

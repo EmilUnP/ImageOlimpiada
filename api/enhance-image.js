@@ -1,5 +1,10 @@
 import { saveUploadedImage } from './lib/blob-storage.js';
-import { generateWithProviderFallback, validateAiConfig, classifyAiError } from '../server/lib/ai-provider.js';
+import {
+  generateWithProviderFallback,
+  validateAiConfig,
+  classifyAiError,
+  getDefaultImageModel,
+} from '../server/lib/ai-provider.js';
 import { enhancementPrompts, buildEnhancementPrompt } from '../server/lib/enhancement-modes.js';
 
 export default async function handler(req, res) {
@@ -58,6 +63,7 @@ export default async function handler(req, res) {
 
       const base64Data = image.split(',')[1] || image;
       const result = await generateWithProviderFallback({
+        model: getDefaultImageModel(),
         parts: [
           prompt,
           { inlineData: { data: base64Data, mimeType } },
