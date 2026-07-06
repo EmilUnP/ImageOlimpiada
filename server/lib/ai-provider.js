@@ -6,6 +6,8 @@ import {
   getOpenRouterImageModel,
   getOpenRouterVisionModel,
   getOpenRouterImageModels,
+  getOpenRouterEnhanceImageModel,
+  getOpenRouterEnhanceImageModels,
   getOpenRouterVisionModels,
   isOpenRouterImageModel,
   getPublicAiConfig,
@@ -21,6 +23,8 @@ export {
   getOpenRouterImageModel,
   getOpenRouterVisionModel,
   getOpenRouterImageModels,
+  getOpenRouterEnhanceImageModel,
+  getOpenRouterEnhanceImageModels,
   getOpenRouterVisionModels,
   isOpenRouterImageModel,
   getPublicAiConfig,
@@ -71,6 +75,15 @@ export const getDefaultImageModel = (provider = resolveAiProvider(), modelFamily
     ? getOpenRouterImageModel(resolveModelFamily(modelFamily))
     : readEnvModel('GEMINI_IMAGE_MODEL') || GEMINI_IMAGE_MODELS[0];
 
+/** Image enhance only — falls back to GEMINI_IMAGE_MODEL / OPENROUTER_*_IMAGE_MODEL */
+export const getEnhanceImageModel = (provider = resolveAiProvider(), modelFamily = 'gemini') => {
+  const family = resolveModelFamily(modelFamily);
+  if (provider === 'openrouter') {
+    return getOpenRouterEnhanceImageModel(family);
+  }
+  return readEnvModel('GEMINI_ENHANCE_IMAGE_MODEL') || readEnvModel('GEMINI_IMAGE_MODEL') || GEMINI_IMAGE_MODELS[0];
+};
+
 export const getDefaultVisionModel = (provider = resolveAiProvider(), modelFamily = 'gemini') => {
   if (provider === 'openrouter') {
     return getOpenRouterVisionModel(resolveModelFamily(modelFamily));
@@ -103,16 +116,32 @@ export const getPreferredImageModels = (explicitModel) => {
   return [...GEMINI_IMAGE_MODELS];
 };
 
+/** Image models for enhance — env enhance model first, then fallbacks */
+export const getPreferredEnhanceImageModels = (explicitModel) => {
+  const envEnhance = readEnvModel('GEMINI_ENHANCE_IMAGE_MODEL');
+  const envImage = readEnvModel('GEMINI_IMAGE_MODEL');
+  const primary = (explicitModel?.trim() || envEnhance || envImage || '').trim() || null;
+
+  if (primary) {
+    const normalized = normalizeDirectImageModel(primary);
+    return [normalized, ...GEMINI_IMAGE_MODELS.filter((m) => m !== normalized)];
+  }
+  return [...GEMINI_IMAGE_MODELS];
+};
+
 export const logActiveModelConfig = () => {
   const provider = resolveAiProvider();
   const vision = getPreferredVisionModels('gemini', provider);
   const image = getPreferredImageModels();
+  const enhance = getPreferredEnhanceImageModels();
   console.log('[ai-provider] ── Active model configuration ──');
   console.log(`  Provider:        ${provider}`);
-  console.log(`  GEMINI_VISION_MODEL (env): ${readEnvModel('GEMINI_VISION_MODEL') || '(not set)'}`);
-  console.log(`  GEMINI_IMAGE_MODEL (env):  ${readEnvModel('GEMINI_IMAGE_MODEL') || '(not set)'}`);
-  console.log(`  OCR / translate chain:     ${vision.slice(0, 4).join(' → ')}`);
-  console.log(`  Image edit chain:          ${image.slice(0, 4).join(' → ')}`);
+  console.log(`  GEMINI_VISION_MODEL (env):   ${readEnvModel('GEMINI_VISION_MODEL') || '(not set)'}`);
+  console.log(`  GEMINI_ENHANCE_IMAGE_MODEL:  ${readEnvModel('GEMINI_ENHANCE_IMAGE_MODEL') || '(not set — uses GEMINI_IMAGE_MODEL)'}`);
+  console.log(`  GEMINI_IMAGE_MODEL (env):    ${readEnvModel('GEMINI_IMAGE_MODEL') || '(not set)'}`);
+  console.log(`  OCR / translate chain:       ${vision.slice(0, 4).join(' → ')}`);
+  console.log(`  Enhance chain:               ${enhance.slice(0, 4).join(' → ')}`);
+  console.log(`  Translate-image chain:       ${image.slice(0, 4).join(' → ')}`);
   if (provider === 'openrouter') {
     logOpenRouterModelConfig();
   }
@@ -180,6 +209,14 @@ const getImageModelsForProvider = (provider, explicitModel, modelFamily = 'gemin
   }
 
   return getPreferredImageModels(explicitModel);
+};
+
+const getEnhanceImageModelsForProvider = (provider, explicitModel, modelFamily = 'gemini') => {
+  if (provider === 'openrouter') {
+    return getOpenRouterEnhanceImageModels(resolveModelFamily(modelFamily), explicitModel);
+  }
+
+  return getPreferredEnhanceImageModels(explicitModel);
 };
 
 export const isModelNotFoundError = (error) =>
@@ -516,11 +553,15 @@ export async function generateWithProviderFallback({
   parts,
   generationConfig = {},
   modelFamily = 'gemini',
+  purpose = 'image',
 }) {
   const primary = resolveAiProvider();
   const family = resolveModelFamily(modelFamily);
-  const resolvedModel = model?.trim() || getDefaultImageModel(primary, family);
-  const envImageModel = readEnvModel('GEMINI_IMAGE_MODEL');
+  const isEnhance = purpose === 'enhance';
+  const resolvedModel =
+    model?.trim() ||
+    (isEnhance ? getEnhanceImageModel(primary, family) : getDefaultImageModel(primary, family));
+  const envImageModel = readEnvModel(isEnhance ? 'GEMINI_ENHANCE_IMAGE_MODEL' : 'GEMINI_IMAGE_MODEL');
 
   const alternate = primary === 'openrouter' ? 'gemini' : 'openrouter';
   const providers = [primary];
@@ -534,7 +575,9 @@ export async function generateWithProviderFallback({
     const apiKey = getAiApiKey(provider);
     if (!apiKey) continue;
 
-    const models = getImageModelsForProvider(provider, resolvedModel, family);
+    const models = isEnhance
+      ? getEnhanceImageModelsForProvider(provider, resolvedModel, family)
+      : getImageModelsForProvider(provider, resolvedModel, family);
 
     for (let mi = 0; mi < models.length; mi++) {
       const modelName = models[mi];
@@ -547,7 +590,7 @@ export async function generateWithProviderFallback({
           console.warn(`[ai-provider] Trying fallback model ${modelName} on ${provider}`);
         } else {
           console.log(
-            `[ai-provider] Using ${provider} / ${modelName}${fromEnv ? ' (GEMINI_IMAGE_MODEL from .env)' : model ? '' : ' (default chain)'}`
+            `[ai-provider] Using ${provider} / ${modelName}${fromEnv ? ` (${isEnhance ? 'GEMINI_ENHANCE_IMAGE_MODEL' : 'GEMINI_IMAGE_MODEL'} from .env)` : model ? '' : ' (default chain)'} [${purpose}]`
           );
         }
 

@@ -3,7 +3,7 @@ import {
   generateWithProviderFallback,
   validateAiConfig,
   classifyAiError,
-  getDefaultImageModel,
+  getEnhanceImageModel,
   resolveModelFamily,
 } from '../server/lib/ai-provider.js';
 import { enhancementPrompts, buildEnhancementPrompt } from '../server/lib/enhancement-modes.js';
@@ -65,12 +65,13 @@ export default async function handler(req, res) {
       const base64Data = image.split(',')[1] || image;
       const family = resolveModelFamily(modelFamily);
       const result = await generateWithProviderFallback({
-        model: getDefaultImageModel(undefined, family),
+        model: getEnhanceImageModel(undefined, family),
         parts: [
           prompt,
           { inlineData: { data: base64Data, mimeType } },
         ],
         modelFamily: family,
+        purpose: 'enhance',
       });
 
       const response = await result.response;

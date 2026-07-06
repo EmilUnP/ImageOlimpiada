@@ -62,6 +62,8 @@ const familyEnvListKey = (family, task) =>
     ? `OPENROUTER_OPENAI_${task}_MODELS`
     : `OPENROUTER_GEMINI_${task}_MODELS`;
 
+/** ENHANCE_IMAGE task keys: OPENROUTER_GEMINI_ENHANCE_IMAGE_MODEL, OPENROUTER_OPENAI_ENHANCE_IMAGE_MODEL */
+
 /** @param {ModelFamily} family */
 export const getOpenRouterImageModel = (family = 'gemini') => {
   const fromFamily = readEnvModel(familyEnvKey(family, 'IMAGE'));
@@ -86,6 +88,23 @@ export const getOpenRouterVisionModel = (family = 'gemini') => {
   }
 
   return OPENROUTER_FAMILY_DEFAULTS[family].vision;
+};
+
+/** @param {ModelFamily} family */
+export const getOpenRouterEnhanceImageModel = (family = 'gemini') => {
+  const fromFamily = readEnvModel(familyEnvKey(family, 'ENHANCE_IMAGE'));
+  if (fromFamily) return fromFamily;
+  return getOpenRouterImageModel(family);
+};
+
+/** @param {ModelFamily} family */
+export const getOpenRouterEnhanceImageModels = (family = 'gemini', explicitModel) => {
+  if (explicitModel?.trim()) return [explicitModel.trim()];
+
+  const list = readEnvModel(familyEnvListKey(family, 'ENHANCE_IMAGE'));
+  if (list) return parseCommaList(list);
+
+  return [getOpenRouterEnhanceImageModel(family)];
 };
 
 /** @param {ModelFamily} family */
@@ -186,8 +205,9 @@ export const getPublicAiConfig = (resolvedProvider) => {
 
 export const logOpenRouterModelConfig = () => {
   for (const family of MODEL_FAMILIES) {
-    console.log(`  OpenRouter ${family} image:  ${getOpenRouterImageModel(family)}`);
-    console.log(`  OpenRouter ${family} vision: ${getOpenRouterVisionModel(family)}`);
+    console.log(`  OpenRouter ${family} enhance: ${getOpenRouterEnhanceImageModel(family)}`);
+    console.log(`  OpenRouter ${family} image:   ${getOpenRouterImageModel(family)}`);
+    console.log(`  OpenRouter ${family} vision:  ${getOpenRouterVisionModel(family)}`);
   }
   console.log(`  UI families:               ${parseUiModelFamilies().join(', ')}`);
   console.log(`  Default UI family:         ${getDefaultModelFamily()}`);
