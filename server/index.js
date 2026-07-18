@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { put, list, del } from '@vercel/blob';
-import { listImages } from '../api/lib/blob-storage.js';
+import { getAdminStorageMode, listImages } from '../api/lib/blob-storage.js';
 import {
   createGenerativeAI,
   generateWithProviderFallback,
@@ -98,16 +98,27 @@ Object.entries(UPLOAD_DIRS).forEach(([type, dir]) => {
   }
 });
 
-// Log environment detection and Blob Storage status
-const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+// Admin captures are local by default in development and disabled by default on Vercel.
+const ADMIN_STORAGE_MODE = getAdminStorageMode();
+const BLOB_TOKEN =
+  ADMIN_STORAGE_MODE === 'blob' ? process.env.BLOB_READ_WRITE_TOKEN : null;
 console.log('🔍 Environment Detection:');
 console.log(`   VERCEL env var: ${process.env.VERCEL}`);
 console.log(`   VERCEL_ENV: ${process.env.VERCEL_ENV}`);
 console.log(`   VERCEL_URL: ${process.env.VERCEL_URL}`);
 console.log(`   IS_VERCEL: ${IS_VERCEL}`);
-console.log(`   BLOB_READ_WRITE_TOKEN: ${BLOB_TOKEN ? '✅ Set' : '❌ Not set'}`);
+console.log(`   ADMIN_STORAGE: ${ADMIN_STORAGE_MODE}`);
+console.log(`   Blob enabled: ${BLOB_TOKEN ? '✅ Yes' : '❌ No'}`);
 
-if (IS_VERCEL) {
+if (ADMIN_STORAGE_MODE === 'off') {
+  console.log('ℹ️  Admin image capture is disabled');
+} else if (ADMIN_STORAGE_MODE === 'local') {
+  if (IS_VERCEL) {
+    console.warn('⚠️  ADMIN_STORAGE=local is temporary on Vercel; captures will be skipped');
+  } else {
+    console.log('💾 Admin images will be saved under server/uploads');
+  }
+} else if (IS_VERCEL) {
   if (BLOB_TOKEN) {
     console.log('✅ Running on Vercel with Blob Storage enabled');
     console.log('💾 Files will be saved to Vercel Blob Storage');
@@ -184,11 +195,15 @@ async function saveUploadedImage(base64Image, folderType, metadata = {}) {
       return null;
     }
     
-    // Check if Blob Storage token is available (use it if available, regardless of environment)
-    const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+    const blobToken =
+      ADMIN_STORAGE_MODE === 'blob' ? process.env.BLOB_READ_WRITE_TOKEN : null;
     
-    // Use Blob Storage if token is available (works on Vercel and can work locally too)
-    if (BLOB_TOKEN) {
+    if (ADMIN_STORAGE_MODE === 'off') {
+      return null;
+    }
+
+    // Use Blob Storage only when explicitly selected.
+    if (blobToken) {
       try {
         console.log(`📤 Attempting to save to Vercel Blob Storage: ${folderType}/${filename}`);
         console.log(`   Buffer size: ${(buffer.length / 1024).toFixed(2)} KB`);
@@ -201,7 +216,7 @@ async function saveUploadedImage(base64Image, folderType, metadata = {}) {
           access: 'public',
           contentType: mimeType,
           addRandomSuffix: false,
-          token: BLOB_TOKEN,
+          token: blobToken,
         });
         
         console.log(`✅ Successfully saved to Vercel Blob: ${imageBlob.url}`);
@@ -226,7 +241,7 @@ async function saveUploadedImage(base64Image, folderType, metadata = {}) {
             access: 'public',
             contentType: 'application/json',
             addRandomSuffix: false,
-            token: BLOB_TOKEN,
+            token: blobToken,
           }
         );
         
@@ -290,7 +305,14 @@ async function saveUploadedImage(base64Image, folderType, metadata = {}) {
     fs.writeFileSync(metadataPath, JSON.stringify(metadataContent, null, 2));
     console.log(`💾 Saved metadata: ${metadataFilename}`);
     
-    return { filename, filePath, metadataPath };
+    return {
+      filename,
+      url: `/uploads/${folderType}/${filename}`,
+      filePath,
+      metadataPath,
+      size: buffer.length,
+      mimeType,
+    };
   } catch (error) {
     console.error('Error saving uploaded image:', error);
     console.error('Error stack:', error.stack);
@@ -317,20 +339,22 @@ app.get('/health', (req, res) => {
 // Debug endpoint for Blob Storage testing
 app.get('/api/debug/blob-storage', async (req, res) => {
   try {
-    const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+    const blobToken =
+      ADMIN_STORAGE_MODE === 'blob' ? process.env.BLOB_READ_WRITE_TOKEN : null;
     const envInfo = {
       IS_VERCEL,
       VERCEL: process.env.VERCEL,
       VERCEL_ENV: process.env.VERCEL_ENV,
       VERCEL_URL: process.env.VERCEL_URL,
-      BLOB_TOKEN_SET: !!BLOB_TOKEN,
-      BLOB_TOKEN_LENGTH: BLOB_TOKEN ? BLOB_TOKEN.length : 0,
+      ADMIN_STORAGE_MODE,
+      BLOB_TOKEN_SET: !!blobToken,
+      BLOB_TOKEN_LENGTH: blobToken ? blobToken.length : 0,
     };
     
-    if (!BLOB_TOKEN) {
+    if (!blobToken) {
       return res.json({
-        status: 'error',
-        message: 'BLOB_READ_WRITE_TOKEN not set',
+        status: 'disabled',
+        message: `Blob Storage is disabled because ADMIN_STORAGE=${ADMIN_STORAGE_MODE}`,
         env: envInfo
       });
     }
@@ -339,7 +363,7 @@ app.get('/api/debug/blob-storage', async (req, res) => {
     try {
       const { blobs } = await list({
         limit: 10,
-        token: BLOB_TOKEN,
+        token: blobToken,
       });
       
       return res.json({
@@ -392,10 +416,11 @@ app.get('/api/admin/images/:folderType', async (req, res) => {
       return res.status(400).json({ error: 'Invalid folder type' });
     }
 
-    const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+    const blobToken =
+      ADMIN_STORAGE_MODE === 'blob' ? process.env.BLOB_READ_WRITE_TOKEN : null;
 
-    // Use Blob when token is set (local dev + Vercel) — matches saveUploadedImage behavior
-    if (BLOB_TOKEN) {
+    // Use Blob only when explicitly selected.
+    if (blobToken) {
       try {
         const { images } = await listImages(folderType);
         console.log(`✅ Retrieved ${images.length} images from Blob Storage (${folderType})`);
@@ -445,13 +470,15 @@ app.get('/api/admin/images/:folderType', async (req, res) => {
           }
         }
 
+        // Keep local /uploads URL — do not let old Blob metadata overwrite it.
+        const { url: _ignoredMetadataUrl, ...safeMetadata } = metadata;
         return {
           filename: file,
           url: `/uploads/${folderType}/${file}`,
           size: stats.size,
           created: stats.birthtime,
           modified: stats.mtime,
-          ...metadata,
+          ...safeMetadata,
         };
       })
       .sort((a, b) => new Date(b.created) - new Date(a.created));
@@ -478,21 +505,22 @@ app.delete('/api/admin/images/:folderType/:filename', async (req, res) => {
     }
     
     // Try to delete from Blob Storage if token is available
-    const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+    const blobToken =
+      ADMIN_STORAGE_MODE === 'blob' ? process.env.BLOB_READ_WRITE_TOKEN : null;
     
-    if (BLOB_TOKEN) {
+    if (blobToken) {
       try {
         console.log(`🗑️ Attempting to delete from Blob Storage: ${folderType}/${filename}`);
         
         // Delete the image file
         const imagePath = `${folderType}/${filename}`;
-        await del(imagePath, { token: BLOB_TOKEN });
+        await del(imagePath, { token: blobToken });
         
         // Try to delete associated metadata file
         const metadataFile = filename.replace(/\.[^/.]+$/, '') + '.json';
         const metadataPath = `${folderType}/${metadataFile}`;
         try {
-          await del(metadataPath, { token: BLOB_TOKEN });
+          await del(metadataPath, { token: blobToken });
         } catch (e) {
           // Metadata file might not exist, that's okay
           console.log('Metadata file not found or already deleted:', metadataPath);

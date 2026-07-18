@@ -1,11 +1,43 @@
 import { put, list, del } from '@vercel/blob';
 import path from 'path';
 
+const ADMIN_STORAGE_MODES = new Set(['local', 'blob', 'off']);
+let hasLoggedDisabledStorage = false;
+
+/**
+ * Admin capture storage:
+ * - local: Express saves under server/uploads (not persistent on Vercel)
+ * - blob: Vercel Blob
+ * - off: no admin captures
+ */
+export function getAdminStorageMode() {
+  const configuredMode = process.env.ADMIN_STORAGE?.trim().toLowerCase();
+  if (ADMIN_STORAGE_MODES.has(configuredMode)) return configuredMode;
+
+  return process.env.VERCEL ? 'off' : 'local';
+}
+
+const shouldUseBlobStorage = () => getAdminStorageMode() === 'blob';
+
+const logDisabledServerlessStorageOnce = () => {
+  if (hasLoggedDisabledStorage) return;
+  hasLoggedDisabledStorage = true;
+  console.log(
+    `[admin-storage] ${getAdminStorageMode()} mode: skipping Vercel Blob writes. ` +
+      'Local files are only persisted by the Express development server.'
+  );
+};
+
 /**
  * Save uploaded image to Vercel Blob Storage
  */
 export async function saveUploadedImage(base64Image, folderType, metadata = {}) {
   try {
+    if (!shouldUseBlobStorage()) {
+      logDisabledServerlessStorageOnce();
+      return null;
+    }
+
     // Validate folderType
     if (!folderType || (folderType !== 'enhancement' && folderType !== 'translation')) {
       console.error(`Invalid folderType: ${folderType}`);
@@ -141,6 +173,10 @@ export async function saveUploadedImage(base64Image, folderType, metadata = {}) 
  */
 export async function listImages(folderType) {
   try {
+    if (!shouldUseBlobStorage()) {
+      return { images: [] };
+    }
+
     console.log(`📥 listImages called for folderType: ${folderType}`);
     
     const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
@@ -222,6 +258,12 @@ export async function listImages(folderType) {
  */
 export async function deleteImage(folderType, filename) {
   try {
+    if (!shouldUseBlobStorage()) {
+      throw new Error(
+        `Admin storage is "${getAdminStorageMode()}"; Blob deletion is disabled.`
+      );
+    }
+
     const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
     
     if (!BLOB_TOKEN) {
