@@ -1,6 +1,5 @@
 import '../server/load-env.js';
 import { validateAiConfig, classifyAiError, resolveModelFamily } from '../server/lib/ai-provider.js';
-import { saveUploadedImage } from './lib/blob-storage.js';
 import { renderTranslatedImage } from '../server/lib/translate-image-render.js';
 import { getLanguageName, normaliseTextPairs } from '../server/lib/normalise-text-pairs.js';
 
@@ -41,19 +40,6 @@ export default async function handler(req, res) {
 
     const textPairs = normaliseTextPairs(translatedTexts);
     const targetLangName = getLanguageName(targetLanguage);
-
-    try {
-      await saveUploadedImage(image, 'translation', {
-        targetLanguage,
-        quality,
-        translatedTextsCount: textPairs.length,
-        type: 'translation',
-        stage: 'image-translation',
-        endpoint: '/api/translate-image',
-      });
-    } catch (saveError) {
-      console.error('translate-image: Error saving uploaded image:', saveError);
-    }
 
     const configError = validateAiConfig();
     if (configError) {

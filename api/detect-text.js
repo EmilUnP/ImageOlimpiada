@@ -8,7 +8,6 @@ import {
   resolveModelFamily,
   resolveAiProvider,
 } from '../server/lib/ai-provider.js';
-import { saveUploadedImage } from './lib/blob-storage.js';
 import { TEXTBOOK_OCR_PROMPT } from '../server/lib/textbook-prompts.js';
 
 const GENERATION_CONFIG = {
@@ -123,17 +122,6 @@ export default async function handler(req, res) {
     if (!image || typeof image !== 'string') {
       res.status(400).json({ error: 'No image provided' });
       return;
-    }
-
-    try {
-      await saveUploadedImage(image, 'translation', {
-        model: requestedModel || 'default',
-        type: 'translation',
-        stage: 'text-detection',
-        endpoint: '/api/detect-text',
-      });
-    } catch (saveError) {
-      console.error('Error saving uploaded image for analysis:', saveError);
     }
 
     const configError = validateAiConfig();

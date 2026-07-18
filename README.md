@@ -20,9 +20,10 @@ Enhance image quality and translate text in images using AI. Built with React, E
 npm install
 ```
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (see `.env.example`):
 
 ```env
+AI_PROVIDER=gemini
 GEMINI_API_KEY=your_api_key_here
 PORT=3001
 ```
@@ -30,9 +31,8 @@ PORT=3001
 Optional:
 
 ```env
-AI_PROVIDER=gemini          # or openrouter
-OPENROUTER_API_KEY=...      # if using OpenRouter
-BLOB_READ_WRITE_TOKEN=...   # for persistent image storage on Vercel
+AI_PROVIDER=openrouter
+OPENROUTER_API_KEY=...
 VITE_API_URL=               # leave empty for auto-detection
 ```
 
@@ -44,7 +44,6 @@ npm run dev:all
 
 - Frontend: http://localhost:8080
 - Backend: http://localhost:3001
-- Admin panel: http://localhost:8080/admin
 
 Or run separately:
 
@@ -56,7 +55,7 @@ npm run dev           # Frontend on :8080
 ## Vercel Deployment
 
 1. Push to GitHub and import the project in [Vercel](https://vercel.com)
-2. Set environment variables: `GEMINI_API_KEY` (and optionally `BLOB_READ_WRITE_TOKEN`, `OPENROUTER_API_KEY`)
+2. Set environment variables: `GEMINI_API_KEY` (and optionally `OPENROUTER_API_KEY` / `AI_PROVIDER`)
 3. Deploy — API routes in `/api` are deployed as serverless functions
 
 ## API Endpoints
@@ -65,19 +64,16 @@ npm run dev           # Frontend on :8080
 |----------|--------|-------------|
 | `/api/enhance-image` | POST | Enhance an image |
 | `/api/enhancement-modes` | GET | List enhancement modes |
+| `/api/ai-config` | GET | Public AI provider / model-family config |
 | `/api/detect-text` | POST | Detect text in an image |
 | `/api/translate-text` | POST | Translate text strings |
 | `/api/translate-image` | POST | Apply translations to an image |
-| `/api/admin/images/:folderType` | GET | List uploaded images |
-| `/api/admin/images/:folderType/:filename` | DELETE | Delete an uploaded image |
 
 ## Troubleshooting
 
-**"AI service not configured"** — Set `GEMINI_API_KEY` in `.env` (local) or Vercel environment variables.
+**"AI service not configured"** — Set `GEMINI_API_KEY` (or OpenRouter keys) in `.env` or Vercel environment variables.
 
 **"Failed to process image" (local)** — Ensure the backend is running on port 3001.
-
-**Admin page empty on Vercel** — Set `BLOB_READ_WRITE_TOKEN` for persistent blob storage.
 
 ## License
 
