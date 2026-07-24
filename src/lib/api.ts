@@ -13,7 +13,7 @@ const wrapNetworkError = (error: unknown, action: string): Error => {
   return new Error(`${action}: ${String(error)}`);
 };
 
-export type ModelFamily = "gemini" | "openai";
+export type ModelFamily = "gemini" | "openai" | "grok";
 
 export interface AiConfigResponse {
   provider: "gemini" | "openrouter";

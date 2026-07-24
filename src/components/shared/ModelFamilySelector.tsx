@@ -28,7 +28,12 @@ export const ModelFamilySelector = ({
       />
       {value === "openai" && (
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          OCR & text via GPT-4o. Image enhance & translate via GPT Image (OpenRouter Image API).
+          OCR & text via GPT. Image enhance & translate via GPT Image (OpenRouter Image API).
+        </p>
+      )}
+      {value === "grok" && (
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          Image enhance via Grok Imagine Quality (2K). OCR & text still use Gemini via OpenRouter.
         </p>
       )}
     </div>

@@ -1,8 +1,8 @@
 import '../load-env.js';
 
-/** @typedef {'gemini' | 'openai'} ModelFamily */
+/** @typedef {'gemini' | 'openai' | 'grok'} ModelFamily */
 
-export const MODEL_FAMILIES = /** @type {const} */ (['gemini', 'openai']);
+export const MODEL_FAMILIES = /** @type {const} */ (['gemini', 'openai', 'grok']);
 
 const OPENROUTER_FAMILY_DEFAULTS = {
   gemini: {
@@ -13,6 +13,17 @@ const OPENROUTER_FAMILY_DEFAULTS = {
     image: 'openai/gpt-image-2',
     vision: 'openai/gpt-4o',
   },
+  // Image-only on OpenRouter; vision falls back to Gemini for OCR/text.
+  grok: {
+    image: 'x-ai/grok-imagine-image-quality',
+    vision: 'google/gemini-2.5-pro',
+  },
+};
+
+const FAMILY_LABELS = {
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+  grok: 'Grok',
 };
 
 export const readEnvModel = (key) => {
@@ -27,7 +38,7 @@ const parseCommaList = (raw) =>
     .filter(Boolean);
 
 export const parseUiModelFamilies = () => {
-  const raw = readEnvModel('OPENROUTER_UI_FAMILIES') || 'gemini,openai';
+  const raw = readEnvModel('OPENROUTER_UI_FAMILIES') || 'gemini,openai,grok';
   return parseCommaList(raw)
     .map((f) => f.toLowerCase())
     .filter((f) => MODEL_FAMILIES.includes(/** @type {ModelFamily} */ (f)));
@@ -52,17 +63,17 @@ export const resolveModelFamily = (requested) => {
   return getDefaultModelFamily();
 };
 
-const familyEnvKey = (family, task) =>
-  family === 'openai'
-    ? `OPENROUTER_OPENAI_${task}_MODEL`
-    : `OPENROUTER_GEMINI_${task}_MODEL`;
+const familyEnvPrefix = (family) => {
+  if (family === 'openai') return 'OPENROUTER_OPENAI';
+  if (family === 'grok') return 'OPENROUTER_GROK';
+  return 'OPENROUTER_GEMINI';
+};
 
-const familyEnvListKey = (family, task) =>
-  family === 'openai'
-    ? `OPENROUTER_OPENAI_${task}_MODELS`
-    : `OPENROUTER_GEMINI_${task}_MODELS`;
+const familyEnvKey = (family, task) => `${familyEnvPrefix(family)}_${task}_MODEL`;
 
-/** ENHANCE_IMAGE task keys: OPENROUTER_GEMINI_ENHANCE_IMAGE_MODEL, OPENROUTER_OPENAI_ENHANCE_IMAGE_MODEL */
+const familyEnvListKey = (family, task) => `${familyEnvPrefix(family)}_${task}_MODELS`;
+
+/** ENHANCE_IMAGE keys: OPENROUTER_GEMINI|OPENAI|GROK_ENHANCE_IMAGE_MODEL */
 
 /** @param {ModelFamily} family */
 export const getOpenRouterImageModel = (family = 'gemini') => {
@@ -145,12 +156,18 @@ export const getOpenRouterVisionModels = (family = 'gemini', explicitModel) => {
   return [primary];
 };
 
+export const isGrokImagineOpenRouterModel = (modelSlug) => {
+  const slug = (modelSlug || '').toLowerCase();
+  return slug.startsWith('x-ai/grok-imagine');
+};
+
 /**
- * OpenAI GPT Image models use OpenRouter's dedicated Image API (POST /api/v1/images),
+ * Models that use OpenRouter's dedicated Image API (POST /api/v1/images),
  * not chat/completions modalities. Supports input_references for scan editing.
  */
 export const usesOpenRouterDedicatedImageApi = (modelSlug) => {
   const slug = (modelSlug || '').toLowerCase();
+  if (isGrokImagineOpenRouterModel(slug)) return true;
   if (!slug.startsWith('openai/')) return false;
   return /gpt-image|gpt-5(\.\d+)?-image|gpt-5-image/.test(slug);
 };
@@ -159,7 +176,7 @@ export const usesOpenRouterDedicatedImageApi = (modelSlug) => {
 export const isOpenRouterImageModel = (modelSlug) => {
   if (usesOpenRouterDedicatedImageApi(modelSlug)) return false;
   const slug = (modelSlug || '').toLowerCase();
-  return /image|imagen|dall-e|stable-diffusion|flux|midjourney/.test(slug);
+  return /image|imagen|dall-e|stable-diffusion|flux|midjourney|grok-imagine/.test(slug);
 };
 
 /** Modalities OpenRouter accepts per model — dall-e/imagen via chat API only */
@@ -197,7 +214,7 @@ export const getPublicAiConfig = (resolvedProvider) => {
     showModelFamilySelector: uiProvider === 'openrouter' && families.length > 1,
     modelFamilies: families.map((id) => ({
       id,
-      label: id === 'gemini' ? 'Gemini' : 'OpenAI',
+      label: FAMILY_LABELS[id] || id,
     })),
     defaultModelFamily: defaultFamily,
   };
