@@ -399,8 +399,9 @@ const buildGeminiLikeResponseFromImageApi = (imageApiData) => {
 const openRouterHeaders = (apiKey) => ({
   Authorization: `Bearer ${apiKey}`,
   'Content-Type': 'application/json',
+  // Shown on OpenRouter activity / rankings
   'HTTP-Referer': process.env.APP_URL || 'http://localhost:5173',
-  'X-Title': 'Vision AI',
+  'X-Title': process.env.APP_NAME || process.env.OPENROUTER_APP_TITLE || 'AI Image Optimizer',
 });
 
 class OpenRouterModel {
