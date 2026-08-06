@@ -15,7 +15,6 @@ import {
   getOpenRouterVisionMaxTokens,
   getOpenRouterImageModalities,
   usesOpenRouterDedicatedImageApi,
-  isGrokImagineOpenRouterModel,
 } from './model-config.js';
 
 export {
@@ -32,7 +31,6 @@ export {
   getOpenRouterVisionMaxTokens,
   getOpenRouterImageModalities,
   usesOpenRouterDedicatedImageApi,
-  isGrokImagineOpenRouterModel,
 } from './model-config.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -424,12 +422,7 @@ class OpenRouterModel {
       ],
     };
 
-    // GPT Image supports quality; Grok uses resolution instead.
-    if (isGrokImagineOpenRouterModel(this.modelName)) {
-      body.resolution = '2K';
-    } else {
-      body.quality = 'high';
-    }
+    body.quality = 'high';
 
     console.log(`[ai-provider] OpenRouter Image API → ${this.modelName} (with reference image)`);
 
