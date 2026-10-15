@@ -1,8 +1,17 @@
 const MAX_ITEMS_PER_BATCH = 6;
 const MAX_CHARS_PER_BATCH = 1800;
 
-import { resolveAiProvider, getPreferredVisionModels, getOpenRouterVisionModel } from './ai-provider.js';
+import { resolveAiProvider, getModelsFor } from './ai-provider.js';
 import { buildAcademicTextTranslationPrompt } from './textbook-prompts.js';
+import { resolveSubject } from './subject-rules.js';
+import {
+  maskFormulas,
+  unmaskFormulas,
+  hasTranslatableText,
+  normaliseLatexBackslashes,
+  parseJsonWithLatex,
+  decodeJsonStringBody,
+} from './formula-utils.js';
 
 export class TranslationServiceError extends Error {
   constructor(message, { statusCode = 500, details } = {}) {
@@ -60,17 +69,6 @@ const chunkTexts = (items) => {
   return batches;
 };
 
-const escapeForPrompt = (text) => {
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\r?\n/g, ' ')
-    .trim();
-};
-
-const buildPrompt = (items, targetLanguageName) =>
-  buildAcademicTextTranslationPrompt(items, targetLanguageName);
-
 const extractArrayFromResponse = (raw) => {
   const codeBlockMatch = raw.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
   if (codeBlockMatch) {
@@ -86,12 +84,11 @@ const extractArrayFromResponse = (raw) => {
 };
 
 export const tryParseJsonArray = (raw, expectedLength) => {
-  let parsed = [];
+  let parsed = parseJsonWithLatex(extractArrayFromResponse(raw));
 
-  try {
-    parsed = JSON.parse(extractArrayFromResponse(raw));
-  } catch (error) {
-    const quotedMatches = [...raw.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  if (parsed === undefined) {
+    console.warn('[translate-text] Model output is not valid JSON; using line-based fallback. Output:', raw.slice(0, 500));
+    const quotedMatches = [...raw.matchAll(/"((?:[^"\\]|\\.)+)"/g)].map((m) => decodeJsonStringBody(m[1]));
     if (quotedMatches.length >= expectedLength) {
       parsed = quotedMatches.slice(0, expectedLength);
     } else {
@@ -191,8 +188,8 @@ const isBatchSplittableError = (error) => {
   );
 };
 
-const translateBatch = async ({ model, batch, targetLanguageName, generationConfig }) => {
-  const prompt = buildPrompt(batch, targetLanguageName);
+const translateBatch = async ({ model, batch, targetLanguageName, subject, generationConfig }) => {
+  const prompt = buildAcademicTextTranslationPrompt(batch, targetLanguageName, subject);
   const result = await model.generateContent([prompt], { generationConfig });
   const response = await result.response;
   const text = response.text();
@@ -200,7 +197,29 @@ const translateBatch = async ({ model, batch, targetLanguageName, generationConf
   return tryParseJsonArray(text, batch.length);
 };
 
-export const performTranslations = async ({ genAI, items, targetLanguageName, modelFamily = 'gemini' }) => {
+/**
+ * Formulas without Cyrillic are swapped for [[F1]] tokens so the model cannot rewrite them.
+ * Blocks that are only formulas/numbers skip the model and come back unchanged.
+ */
+const prepareItems = (items) => {
+  const prepared = items.map((item) => {
+    const { masked, formulas } = maskFormulas(item.text);
+    return { originalIndex: item.originalIndex, source: item.text, text: masked, formulas };
+  });
+
+  return {
+    passthrough: prepared.filter((item) => !hasTranslatableText(item.text)),
+    toTranslate: prepared.filter((item) => hasTranslatableText(item.text)),
+  };
+};
+
+export const performTranslations = async ({
+  genAI,
+  items,
+  targetLanguageName,
+  modelFamily = 'gemini',
+  subject = 'auto',
+}) => {
   const generationConfig = {
     temperature: 0.3,
     topP: 0.9,
@@ -208,12 +227,16 @@ export const performTranslations = async ({ genAI, items, targetLanguageName, mo
     maxOutputTokens: 2048,
   };
 
+  const { passthrough, toTranslate } = prepareItems(items);
+  const passthroughResults = Object.fromEntries(passthrough.map((item) => [item.originalIndex, item.source]));
+
+  if (toTranslate.length === 0) {
+    return passthroughResults;
+  }
+
   const family = modelFamily || 'gemini';
-  const preferredModels = getPreferredVisionModels(family);
-  const configuredModel =
-    resolveAiProvider() === 'openrouter'
-      ? getOpenRouterVisionModel(family)
-      : process.env.GEMINI_VISION_MODEL?.trim();
+  const preferredModels = getModelsFor('vision', family);
+  const configuredModel = preferredModels[0];
 
   let lastError;
 
@@ -236,38 +259,68 @@ export const performTranslations = async ({ genAI, items, targetLanguageName, mo
       );
     }
 
-    const batches = chunkTexts(items);
-    const results = {};
+    const batches = chunkTexts(toTranslate);
+    const results = { ...passthroughResults };
+
+    const translateAndRestore = async (batch) => {
+      const translations = await translateBatch({ model, batch, targetLanguageName, subject, generationConfig });
+      return batch.map((item, index) => ({
+        item,
+        ...unmaskFormulas(normaliseLatexBackslashes(translations[index] ?? '', item.source), item.formulas),
+      }));
+    };
+
+    // A lost or invented [[F#]] token means a formula would vanish — retry alone, then fall back to unmasked text
+    const settle = async (outcomes) => {
+      for (const { item, text, complete } of outcomes) {
+        if (complete) {
+          results[item.originalIndex] = text;
+          continue;
+        }
+
+        console.warn(`[translate-text] Formula tokens lost in block ${item.originalIndex + 1}; retrying it alone.`);
+        const [retry] = await translateAndRestore([item]);
+        if (retry.complete) {
+          results[item.originalIndex] = retry.text;
+          continue;
+        }
+
+        console.warn(`[translate-text] Retry lost formula tokens again; translating block ${item.originalIndex + 1} unmasked.`);
+        const [unmasked] = await translateBatch({
+          model,
+          batch: [{ ...item, text: item.source }],
+          targetLanguageName,
+          subject,
+          generationConfig,
+        });
+        results[item.originalIndex] = normaliseLatexBackslashes(unmasked ?? '', item.source);
+      }
+    };
 
     try {
       for (const batch of batches) {
+        let outcomes;
         try {
-          const translations = await translateBatch({ model, batch, targetLanguageName, generationConfig });
-          batch.forEach((item, index) => {
-            results[item.originalIndex] = translations[index] ?? '';
-          });
+          outcomes = await translateAndRestore(batch);
         } catch (error) {
-          const classified = classifyGeminiError(error);
-
           if (batch.length > 1 && isBatchSplittableError(error)) {
+            outcomes = [];
             for (const item of batch) {
               try {
-                const singleTranslation = await translateBatch({
-                  model,
-                  batch: [item],
-                  targetLanguageName,
-                  generationConfig,
-                });
-                results[item.originalIndex] = singleTranslation[0] ?? '';
+                outcomes.push(...(await translateAndRestore([item])));
               } catch (singleError) {
                 throw classifyGeminiError(singleError);
               }
             }
-          } else if (classified.modelRetry) {
-          throw classified;
           } else {
-            throw classified;
+            throw classifyGeminiError(error);
           }
+        }
+
+        try {
+          await settle(outcomes);
+        } catch (error) {
+          throw classifyGeminiError(error);
         }
       }
 
@@ -295,7 +348,7 @@ export const performTranslations = async ({ genAI, items, targetLanguageName, mo
 
 export const createTextTranslationService = (genAI) => {
   return {
-    async translateTexts({ texts, targetLanguage, modelFamily = 'gemini' }) {
+    async translateTexts({ texts, targetLanguage, modelFamily = 'gemini', subject = 'auto' }) {
       if (!Array.isArray(texts)) {
         throw new TranslationServiceError('Texts must be provided as an array', { statusCode: 400 });
       }
@@ -317,6 +370,7 @@ export const createTextTranslationService = (genAI) => {
         items: sanitizedItems,
         targetLanguageName,
         modelFamily,
+        subject: resolveSubject(subject),
       });
 
       sanitizedItems.forEach((item) => {

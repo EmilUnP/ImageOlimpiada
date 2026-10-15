@@ -8,6 +8,7 @@ import { Image as ImageIcon } from "lucide-react";
 const Index = () => {
   const [selectedTool, setSelectedTool] = useState<AppTool>("enhance");
   const {
+    config,
     modelFamily,
     setModelFamily,
     showModelFamilySelector,
@@ -44,12 +45,7 @@ const Index = () => {
                 modelFamilyOptions={modelFamilyOptions}
               />
             ) : (
-              <TranslationWorkflow
-                modelFamily={modelFamily}
-                onModelFamilyChange={setModelFamily}
-                showModelFamilySelector={showModelFamilySelector && !isAiConfigLoading}
-                modelFamilyOptions={modelFamilyOptions}
-              />
+              <TranslationWorkflow modelLabel={config?.translationModelLabel} />
             )}
           </div>
         </main>

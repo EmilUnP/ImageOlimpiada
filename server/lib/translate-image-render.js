@@ -1,5 +1,7 @@
-import { generateWithProviderFallback, getImageModelForQuality } from './ai-provider.js';
+import { generateWithProviderFallback, getModelsFor } from './ai-provider.js';
 import { buildImageTextReplacementPrompt } from './textbook-prompts.js';
+import { resolveSubject } from './subject-rules.js';
+import { normaliseForCompare } from './formula-utils.js';
 
 const parseBase64Image = (base64Image) => {
   if (typeof base64Image !== 'string' || !base64Image.trim()) {
@@ -34,15 +36,28 @@ export async function renderTranslatedImage({
   textPairs = [],
   targetLanguage = 'en',
   targetLangName,
-  quality = 'premium',
   correctedTexts,
   modelFamily = 'gemini',
+  subject = 'auto',
 }) {
-  const pairs = textPairs.filter((p) => p.original?.trim() && p.translated?.trim());
+  const validPairs = textPairs.filter((p) => p.original?.trim() && p.translated?.trim());
+  // Formula/number-only blocks come back unchanged — sending them as "X → X" makes the image
+  // model erase and redraw them, which flattens subscripts and fractions. Protect them instead.
+  const isUnchanged = (p) => normaliseForCompare(p.original) === normaliseForCompare(p.translated);
+  const pairs = validPairs.filter((p) => !isUnchanged(p));
+  const protectedTexts = validPairs.filter(isUnchanged).map((p) => p.original);
   const hasPairs = pairs.length > 0;
   const hasCorrected = Array.isArray(correctedTexts) && correctedTexts.length > 0;
 
   if (!hasPairs && !hasCorrected) {
+    if (protectedTexts.length > 0) {
+      return {
+        translatedImage: image,
+        method: 'unchanged',
+        message: 'Only formulas and numbers found — nothing to replace, image kept as is.',
+        appliedCount: 0,
+      };
+    }
     return {
       translatedImage: null,
       method: 'none',
@@ -50,7 +65,6 @@ export async function renderTranslatedImage({
     };
   }
 
-  const imageModel = getImageModelForQuality(quality, undefined, modelFamily);
   const { mimeType, data } = parseBase64Image(image);
 
   if (!data) {
@@ -61,20 +75,24 @@ export async function renderTranslatedImage({
     };
   }
 
+  const resolvedSubject = resolveSubject(subject);
   const prompt = buildImageTextReplacementPrompt({
     textPairs: pairs,
+    protectedTexts,
     correctedTexts,
     targetLangName: targetLangName || targetLanguage,
+    subject: resolvedSubject,
   });
 
   console.log('[translate-image]', {
-    model: imageModel,
+    models: getModelsFor('image', modelFamily),
     replacements: pairs.length,
+    protectedFormulas: protectedTexts.length,
+    subject: resolvedSubject,
     targetLanguage,
   });
 
   const result = await generateWithProviderFallback({
-    model: imageModel,
     parts: [prompt, { inlineData: { data, mimeType } }],
     modelFamily,
   });

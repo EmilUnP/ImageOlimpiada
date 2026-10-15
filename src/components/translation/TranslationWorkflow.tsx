@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, lazy, Suspense } from "react";
 import { Languages, Loader2, RotateCcw, Pencil, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImageUpload } from "@/components/shared/ImageUpload";
@@ -6,35 +6,27 @@ import { OptionGrid } from "@/components/shared/OptionGrid";
 import { OutputPanel } from "@/components/shared/OutputPanel";
 import { Panel } from "@/components/shared/Panel";
 import { WorkflowHeader } from "@/components/shared/WorkflowHeader";
-import { ModelFamilySelector } from "@/components/shared/ModelFamilySelector";
-import { StepIndicator, getStepStatus } from "@/components/shared/StepIndicator";
 import { TranslationPhaseBanner } from "./TranslationPhaseBanner";
-import { TextDetectionAndTranslation } from "./TextDetectionAndTranslation";
 import type { DetectedText, TranslatedText } from "@/lib/types";
 import { useImageTranslation } from "@/hooks/useImageTranslation";
-import { LANGUAGES } from "@/lib/constants";
+import { LANGUAGES, SUBJECTS } from "@/lib/constants";
 import { downloadImage } from "@/lib/utils";
 import { toast } from "sonner";
-import type { ModelFamily } from "@/lib/api";
+import type { Subject } from "@/lib/api";
 
-const DEFAULT_TRANSLATION_SETTINGS = {
-  quality: "premium" as const,
-};
+// Review table pulls in KaTeX — load it only once text has been detected
+const TextDetectionAndTranslation = lazy(() =>
+  import("./TextDetectionAndTranslation").then((m) => ({ default: m.TextDetectionAndTranslation }))
+);
 
 interface TranslationWorkflowProps {
-  modelFamily?: ModelFamily;
-  onModelFamilyChange?: (family: ModelFamily) => void;
-  showModelFamilySelector?: boolean;
-  modelFamilyOptions?: Array<{ id: ModelFamily; label: string }>;
+  /** Model family fixed by TRANSLATION_MODEL_FAMILY in .env — shown, not selectable */
+  modelLabel?: string;
 }
 
-export const TranslationWorkflow = ({
-  modelFamily,
-  onModelFamilyChange,
-  showModelFamilySelector = false,
-  modelFamilyOptions = [],
-}: TranslationWorkflowProps) => {
+export const TranslationWorkflow = ({ modelLabel }: TranslationWorkflowProps) => {
   const [selectedLanguage, setSelectedLanguage] = useState("az");
+  const [subject, setSubject] = useState<Subject>("auto");
   const [showTextReview, setShowTextReview] = useState(false);
   const [isTranslatingText, setIsTranslatingText] = useState(false);
 
@@ -52,38 +44,18 @@ export const TranslationWorkflow = ({
     reset,
   } = useImageTranslation();
 
+  // Last translations sent to the image, so "Edit translations" reopens the table with them
+  const [lastApplied, setLastApplied] = useState<{ language: string; texts: TranslatedText[] } | null>(null);
+
   const languageName = LANGUAGES.find((l) => l.code === selectedLanguage)?.name || selectedLanguage;
   const isComplete = !!translatedImage;
 
-  const steps = useMemo(() => {
-    const uploadDone = !!originalImage;
-    const reviewDone = isComplete;
-    const onReview = showTextReview && !isComplete;
-
-    return [
-      {
-        number: 1,
-        label: "Upload",
-        status: getStepStatus(uploadDone, !uploadDone),
-      },
-      {
-        number: 2,
-        label: "Review",
-        status: getStepStatus(reviewDone, onReview),
-      },
-      {
-        number: 3,
-        label: "Result",
-        status: getStepStatus(reviewDone, uploadDone && !reviewDone && !onReview),
-      },
-    ];
-  }, [originalImage, showTextReview, isComplete]);
-
   const handleImageUpload = async (file: File) => {
+    setLastApplied(null);
     const base64Image = await handleImageSelect(file, selectedLanguage);
     if (!base64Image) return;
 
-    const texts = await detectTextInImage(base64Image, undefined, modelFamily);
+    const texts = await detectTextInImage(base64Image, undefined, subject);
     if (texts.length > 0) {
       setShowTextReview(true);
     } else {
@@ -97,7 +69,7 @@ export const TranslationWorkflow = ({
       const translations = await translateTexts(
         texts.map((t) => t.text),
         selectedLanguage,
-        modelFamily
+        subject
       );
       if (!translations.length) return [];
 
@@ -115,12 +87,13 @@ export const TranslationWorkflow = ({
 
   const handleApplyTranslation = async (finalTranslatedTexts: TranslatedText[]) => {
     setShowTextReview(false);
+    setLastApplied({ language: selectedLanguage, texts: finalTranslatedTexts });
     if (originalImage) {
       await processTranslation(
         originalImage,
         selectedLanguage,
         finalTranslatedTexts,
-        { ...DEFAULT_TRANSLATION_SETTINGS, modelFamily }
+        { subject }
       );
     }
   };
@@ -128,10 +101,15 @@ export const TranslationWorkflow = ({
   const handleStartOver = () => {
     reset();
     setShowTextReview(false);
+    setLastApplied(null);
   };
 
   const handleBackToReview = () => {
     setShowTextReview(true);
+  };
+
+  const handleBackToResult = () => {
+    setShowTextReview(false);
   };
 
   const handleDownload = () => {
@@ -140,7 +118,7 @@ export const TranslationWorkflow = ({
     toast.success("Image downloaded");
   };
 
-  const workspaceLocked = isProcessing || isDetecting || (showTextReview && !isComplete);
+  const workspaceLocked = isProcessing || isDetecting || showTextReview;
 
   return (
     <div className="space-y-5">
@@ -151,13 +129,11 @@ export const TranslationWorkflow = ({
         subtitle={`Replace Russian text on scans → ${languageName}`}
       />
 
-      <StepIndicator steps={steps} className="pb-1" />
-
       {!originalImage && (
         <TranslationPhaseBanner
           step={1}
           title="Upload a scanned page"
-          description="Choose the target language on the left, then upload a book page, diagram, or exam question. We will detect all Russian text automatically."
+          description="Upload a book page, diagram, or exam question. We will detect all Russian text automatically."
         />
       )}
 
@@ -178,19 +154,21 @@ export const TranslationWorkflow = ({
             onSelect={setSelectedLanguage}
             disabled={workspaceLocked}
           />
-          <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
-            Pick the language that should appear on the final image.
-          </p>
 
-          {showModelFamilySelector && modelFamily && onModelFamilyChange && (
-            <div className="mt-4 pt-4 border-t border-border/40">
-              <ModelFamilySelector
-                options={modelFamilyOptions}
-                value={modelFamily}
-                onChange={onModelFamilyChange}
-                disabled={workspaceLocked}
-              />
-            </div>
+          <div className="mt-4 pt-4 border-t border-border/40">
+            <OptionGrid
+              title="Subject"
+              items={SUBJECTS.map(({ id, name, emoji }) => ({ id, name, emoji }))}
+              selectedId={subject}
+              onSelect={(id) => setSubject(id as Subject)}
+              disabled={workspaceLocked}
+            />
+          </div>
+
+          {modelLabel && (
+            <p className="mt-4 pt-4 border-t border-border/40 text-[11px] text-muted-foreground leading-relaxed">
+              AI model: <span className="font-medium text-foreground">{modelLabel}</span> (set in .env)
+            </p>
           )}
         </Panel>
 
@@ -200,22 +178,35 @@ export const TranslationWorkflow = ({
             isComplete && !showTextReview
               ? "Done — compare or start a new page"
               : showTextReview
-                ? "Check text, translate, apply"
+                ? "Check text, translate, and apply"
                 : "Upload a Russian scan"
           }
         >
-          {showTextReview && originalImage && !isComplete ? (
-            <TextDetectionAndTranslation
-              image={originalImage}
-              detectedTexts={detectedTexts}
-              targetLanguageName={languageName}
-              onTextsUpdate={setDetectedTexts}
-              onTranslate={handleTranslateTexts}
-              onApply={handleApplyTranslation}
-              onBack={handleStartOver}
-              isTranslating={isTranslatingText}
-              isApplying={isProcessing}
-            />
+          {showTextReview && originalImage ? (
+            <Suspense
+              fallback={
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-2 px-1">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                  <span>Loading review…</span>
+                </div>
+              }
+            >
+              <TextDetectionAndTranslation
+                image={originalImage}
+                detectedTexts={detectedTexts}
+                targetLanguageName={languageName}
+                onTextsUpdate={setDetectedTexts}
+                onTranslate={handleTranslateTexts}
+                initialTranslations={
+                  lastApplied?.language === selectedLanguage ? lastApplied.texts : undefined
+                }
+                onApply={handleApplyTranslation}
+                onBack={handleStartOver}
+                onCancel={isComplete ? handleBackToResult : undefined}
+                isTranslating={isTranslatingText}
+                isApplying={isProcessing}
+              />
+            </Suspense>
           ) : isComplete && !showTextReview ? (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -250,15 +241,27 @@ export const TranslationWorkflow = ({
               </div>
 
               <div className="flex flex-wrap gap-2 pt-1">
-                <Button onClick={handleDownload} className="gap-2" size="sm">
+                <Button onClick={handleDownload} className="gap-2" size="sm" disabled={isProcessing}>
                   <Download className="h-4 w-4" />
                   Download
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2" onClick={handleBackToReview}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={handleBackToReview}
+                  disabled={isProcessing}
+                >
                   <Pencil className="h-4 w-4" />
                   Edit translations
                 </Button>
-                <Button variant="ghost" size="sm" className="gap-2" onClick={handleStartOver}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-2"
+                  onClick={handleStartOver}
+                  disabled={isProcessing}
+                >
                   <RotateCcw className="h-4 w-4" />
                   New image
                 </Button>

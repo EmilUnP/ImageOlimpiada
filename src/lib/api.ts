@@ -15,12 +15,17 @@ const wrapNetworkError = (error: unknown, action: string): Error => {
 
 export type ModelFamily = "gemini" | "openai";
 
+/** Steers OCR, translation and render rules for formulas and terminology */
+export type Subject = "auto" | "math" | "physics" | "chemistry" | "biology" | "general";
+
 export interface AiConfigResponse {
   provider: "gemini" | "openrouter";
   configuredProvider?: "gemini" | "openrouter";
   showModelFamilySelector: boolean;
   modelFamilies: Array<{ id: ModelFamily; label: string }>;
   defaultModelFamily: ModelFamily;
+  /** Translation always uses this family — set by TRANSLATION_MODEL_FAMILY in .env */
+  translationModelLabel?: string;
 }
 
 export const fetchAiConfig = async (): Promise<AiConfigResponse> => {
@@ -50,7 +55,7 @@ export interface EnhanceImageResponse {
 export interface TranslateTextRequest {
   texts: string[];
   targetLanguage: string;
-  modelFamily?: ModelFamily;
+  subject?: Subject;
 }
 
 export interface TranslateTextResponse {
@@ -67,8 +72,7 @@ export interface TranslateImageRequest {
     translated: string;
   }>;
   correctedTexts?: string[];
-  quality?: "standard" | "premium" | "ultra";
-  modelFamily?: ModelFamily;
+  subject?: Subject;
 }
 
 export interface TranslateImageResponse {
@@ -76,7 +80,7 @@ export interface TranslateImageResponse {
   targetLanguage?: string;
   message?: string;
   analysis?: string;
-  method?: 'ai-image' | 'none';
+  method?: 'ai-image' | 'unchanged' | 'none';
   appliedCount?: number;
   error?: string;
 }
@@ -84,7 +88,7 @@ export interface TranslateImageResponse {
 export interface DetectTextRequest {
   image: string;
   model?: string;
-  modelFamily?: ModelFamily;
+  subject?: Subject;
 }
 
 export interface DetectedTextItem {

@@ -1,5 +1,5 @@
 import '../server/load-env.js';
-import { createGenerativeAI, validateAiConfig, resolveModelFamily } from '../server/lib/ai-provider.js';
+import { createGenerativeAI, validateAiConfig, getTranslationModelFamily } from '../server/lib/ai-provider.js';
 import {
   createTextTranslationService,
   TranslationServiceError,
@@ -23,13 +23,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { texts, targetLanguage = 'en', modelFamily } = req.body;
+    const { texts, targetLanguage = 'en', subject } = req.body;
+    const modelFamily = getTranslationModelFamily();
 
     if (!texts || !Array.isArray(texts) || texts.length === 0) {
       return res.status(400).json({ error: 'No texts provided' });
     }
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'vision', modelFamily });
     if (configError) {
       return res.status(configError.status).json(configError.body);
     }
@@ -39,7 +40,8 @@ export default async function handler(req, res) {
     const { translations, sanitizedCount, targetLanguageName } = await translator.translateTexts({
       texts,
       targetLanguage,
-      modelFamily: resolveModelFamily(modelFamily),
+      modelFamily,
+      subject,
     });
 
     if (sanitizedCount === 0) {

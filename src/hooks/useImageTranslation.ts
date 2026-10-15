@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { translateImage, TranslateImageRequest, detectText, DetectTextRequest, translateText, TranslateTextRequest, type ModelFamily } from '@/lib/api';
+import { translateImage, TranslateImageRequest, detectText, DetectTextRequest, translateText, TranslateTextRequest, type Subject } from '@/lib/api';
 import { useImageUpload } from './useImageUpload';
 import { DetectedText, TranslatedText } from '@/lib/types';
 
@@ -15,14 +15,14 @@ export const useImageTranslation = () => {
   const detectTextInImage = useCallback(async (
     base64Image: string,
     model?: string,
-    modelFamily?: ModelFamily
+    subject?: Subject
   ): Promise<DetectedText[]> => {
     setIsDetecting(true);
     try {
       const request: DetectTextRequest = {
         image: base64Image,
         model,
-        modelFamily,
+        subject,
       };
 
       const data = await detectText(request);
@@ -46,7 +46,7 @@ export const useImageTranslation = () => {
   const translateTexts = useCallback(async (
     texts: string[],
     targetLanguage: string,
-    modelFamily?: ModelFamily
+    subject?: Subject
   ): Promise<string[]> => {
     try {
       if (!texts || texts.length === 0) {
@@ -54,7 +54,7 @@ export const useImageTranslation = () => {
         return [];
       }
 
-      const request: TranslateTextRequest = { texts, targetLanguage, modelFamily };
+      const request: TranslateTextRequest = { texts, targetLanguage, subject };
       const data = await translateText(request);
 
       if (data?.translations && Array.isArray(data.translations)) {
@@ -80,7 +80,7 @@ export const useImageTranslation = () => {
     base64Image: string,
     targetLanguage: string,
     translatedTexts?: TranslatedText[],
-    settings?: { quality?: "standard" | "premium" | "ultra"; modelFamily?: ModelFamily }
+    settings?: { subject?: Subject }
   ) => {
     setIsProcessing(true);
     try {
@@ -100,11 +100,16 @@ export const useImageTranslation = () => {
         image: base64Image,
         targetLanguage,
         translatedTexts: textPairs,
-        quality: settings?.quality || "premium",
-        modelFamily: settings?.modelFamily,
+        subject: settings?.subject,
       };
 
       const data = await translateImage(request);
+
+      if (data?.method === 'unchanged' && data?.translatedImage) {
+        setTranslatedImage(data.translatedImage);
+        toast.info(data.message || "Only formulas found — image kept as is");
+        return data.translatedImage;
+      }
 
       if (data?.method === 'ai-image' && data?.translatedImage) {
         setTranslatedImage(data.translatedImage);

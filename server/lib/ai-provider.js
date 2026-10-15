@@ -1,17 +1,10 @@
 import '../load-env.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
-  readEnvModel,
   resolveModelFamily,
-  getOpenRouterImageModel,
-  getOpenRouterVisionModel,
-  getOpenRouterImageModels,
-  getOpenRouterEnhanceImageModel,
-  getOpenRouterEnhanceImageModels,
-  getOpenRouterVisionModels,
-  isOpenRouterImageModel,
-  getPublicAiConfig,
-  logOpenRouterModelConfig,
+  getModelChain,
+  describeMissingModel,
+  logModelConfig,
   getOpenRouterVisionMaxTokens,
   getOpenRouterImageModalities,
   usesOpenRouterDedicatedImageApi,
@@ -20,12 +13,7 @@ import {
 export {
   readEnvModel,
   resolveModelFamily,
-  getOpenRouterImageModel,
-  getOpenRouterVisionModel,
-  getOpenRouterImageModels,
-  getOpenRouterEnhanceImageModel,
-  getOpenRouterEnhanceImageModels,
-  getOpenRouterVisionModels,
+  getTranslationModelFamily,
   isOpenRouterImageModel,
   getPublicAiConfig,
   getOpenRouterVisionMaxTokens,
@@ -37,164 +25,16 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_IMAGES_API_URL = 'https://openrouter.ai/api/v1/images';
 
 /**
- * Google AI Studio — image IN + image OUT (enhance / translate image).
- * Verified via ListModels API (Nano Banana family).
+ * Models to try, in order, for a task with the active provider — read from .env only.
+ * @param {'vision' | 'image' | 'enhance'} task
  */
-export const GEMINI_IMAGE_MODELS = [
-  'gemini-2.5-flash-image',           // Nano Banana — stable default
-  'gemini-3.1-flash-image',           // Nano Banana 2
-  'gemini-3.1-flash-lite-image',      // Nano Banana 2 Lite — cheaper
-  'gemini-3-pro-image',               // Nano Banana Pro
-  'gemini-3-pro-image-preview',
-  'gemini-3.1-flash-image-preview',
-];
+export const getModelsFor = (task, modelFamily, provider = resolveAiProvider()) =>
+  getModelChain(provider, resolveModelFamily(modelFamily), task);
 
-/**
- * Google AI Studio — image IN + text OUT (OCR, text translation).
- * Multimodal flash models; NOT image-generation models.
- */
-export const GEMINI_VISION_MODELS = [
-  'gemini-2.5-pro',                   // best OCR / academic translation quality
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-001',
-  'gemini-flash-latest',
-  'gemini-2.5-flash-lite',
-];
-
-/** OpenRouter-only names → Google direct API equivalents */
-const OPENROUTER_TO_GEMINI_DIRECT = {
-  'gemini-2.5-flash-image-preview': 'gemini-2.5-flash-image',
-};
-
-export const normalizeDirectImageModel = (modelName) =>
-  OPENROUTER_TO_GEMINI_DIRECT[modelName] || modelName;
-
-export const getDefaultImageModel = (provider = resolveAiProvider(), modelFamily = 'gemini') =>
-  provider === 'openrouter'
-    ? getOpenRouterImageModel(resolveModelFamily(modelFamily))
-    : readEnvModel('GEMINI_IMAGE_MODEL') || GEMINI_IMAGE_MODELS[0];
-
-/** Image enhance only — falls back to GEMINI_IMAGE_MODEL / OPENROUTER_*_IMAGE_MODEL */
-export const getEnhanceImageModel = (provider = resolveAiProvider(), modelFamily = 'gemini') => {
-  const family = resolveModelFamily(modelFamily);
-  if (provider === 'openrouter') {
-    return getOpenRouterEnhanceImageModel(family);
-  }
-  return readEnvModel('GEMINI_ENHANCE_IMAGE_MODEL') || readEnvModel('GEMINI_IMAGE_MODEL') || GEMINI_IMAGE_MODELS[0];
-};
-
-export const getDefaultVisionModel = (provider = resolveAiProvider(), modelFamily = 'gemini') => {
-  if (provider === 'openrouter') {
-    return getOpenRouterVisionModel(resolveModelFamily(modelFamily));
-  }
-  return readEnvModel('GEMINI_VISION_MODEL') || GEMINI_VISION_MODELS[0];
-};
-
-/** Vision models to try — env model first, then fallbacks (deduped) */
-export const getPreferredVisionModels = (modelFamily = 'gemini', provider = resolveAiProvider()) => {
-  if (provider === 'openrouter') {
-    return getOpenRouterVisionModels(resolveModelFamily(modelFamily));
-  }
-
-  const envModel = readEnvModel('GEMINI_VISION_MODEL');
-  if (envModel) {
-    return [envModel, ...GEMINI_VISION_MODELS.filter((m) => m !== envModel)];
-  }
-  return [...GEMINI_VISION_MODELS];
-};
-
-/** Image models to try — env model first, then fallbacks (deduped) */
-export const getPreferredImageModels = (explicitModel) => {
-  const envModel = readEnvModel('GEMINI_IMAGE_MODEL');
-  const primary = (explicitModel?.trim() || envModel || '').trim() || null;
-
-  if (primary) {
-    const normalized = normalizeDirectImageModel(primary);
-    return [normalized, ...GEMINI_IMAGE_MODELS.filter((m) => m !== normalized)];
-  }
-  return [...GEMINI_IMAGE_MODELS];
-};
-
-/** Image models for enhance — env enhance model first, then fallbacks */
-export const getPreferredEnhanceImageModels = (explicitModel) => {
-  const envEnhance = readEnvModel('GEMINI_ENHANCE_IMAGE_MODEL');
-  const envImage = readEnvModel('GEMINI_IMAGE_MODEL');
-  const primary = (explicitModel?.trim() || envEnhance || envImage || '').trim() || null;
-
-  if (primary) {
-    const normalized = normalizeDirectImageModel(primary);
-    return [normalized, ...GEMINI_IMAGE_MODELS.filter((m) => m !== normalized)];
-  }
-  return [...GEMINI_IMAGE_MODELS];
-};
-
-export const logActiveModelConfig = () => {
-  const provider = resolveAiProvider();
-  const vision = getPreferredVisionModels('gemini', provider);
-  const image = getPreferredImageModels();
-  const enhance = getPreferredEnhanceImageModels();
-  console.log('[ai-provider] ── Active model configuration ──');
-  console.log(`  Provider:        ${provider}`);
-  console.log(`  GEMINI_VISION_MODEL (env):   ${readEnvModel('GEMINI_VISION_MODEL') || '(not set)'}`);
-  console.log(`  GEMINI_ENHANCE_IMAGE_MODEL:  ${readEnvModel('GEMINI_ENHANCE_IMAGE_MODEL') || '(not set — uses GEMINI_IMAGE_MODEL)'}`);
-  console.log(`  GEMINI_IMAGE_MODEL (env):    ${readEnvModel('GEMINI_IMAGE_MODEL') || '(not set)'}`);
-  console.log(`  OCR / translate chain:       ${vision.slice(0, 4).join(' → ')}`);
-  console.log(`  Enhance chain:               ${enhance.slice(0, 4).join(' → ')}`);
-  console.log(`  Translate-image chain:       ${image.slice(0, 4).join(' → ')}`);
-  if (provider === 'openrouter') {
-    logOpenRouterModelConfig();
-  }
-  console.log('[ai-provider] ─────────────────────────────────');
-};
-
-/** Pick image model for translate-image based on quality tier */
-export const getImageModelForQuality = (
-  quality = 'premium',
-  provider = resolveAiProvider(),
-  modelFamily = 'gemini'
-) => {
-  const family = resolveModelFamily(modelFamily);
-
-  if (provider === 'openrouter') {
-    const familyEnvKey =
-      family === 'openai' ? 'OPENROUTER_OPENAI_IMAGE_MODEL' : 'OPENROUTER_GEMINI_IMAGE_MODEL';
-    if (readEnvModel(familyEnvKey) || (family === 'gemini' && readEnvModel('IMAGE_MODEL'))) {
-      return getOpenRouterImageModel(family);
-    }
-    if (family === 'openai') return getOpenRouterImageModel('openai');
-
-    if (quality === 'ultra') return 'google/gemini-3-pro-image-preview';
-    if (quality === 'premium') return 'google/gemini-3.1-flash-image-preview';
-    return getOpenRouterImageModel('gemini');
-  }
-
-  const envModel = readEnvModel('GEMINI_IMAGE_MODEL');
-  if (envModel) return normalizeDirectImageModel(envModel);
-
-  if (quality === 'ultra') return 'gemini-3-pro-image';
-  if (quality === 'premium') return 'gemini-3.1-flash-image';
-  return getDefaultImageModel(provider, family);
-};
-
-/** @deprecated use getDefaultImageModel() */
-export const DEFAULT_IMAGE_MODEL = GEMINI_IMAGE_MODELS[0];
+export const logActiveModelConfig = () => logModelConfig(resolveAiProvider());
 
 /** OpenRouter defaults to 32768 max_tokens — too expensive for image output */
 const OPENROUTER_IMAGE_MAX_TOKENS = 4096;
-
-const OPENROUTER_MODEL_MAP = {
-  'gemini-2.5-flash-image': 'google/gemini-2.5-flash-image-preview',
-  'gemini-3-pro-image-preview': 'google/gemini-3-pro-image-preview',
-  'gemini-3-pro-image': 'google/gemini-3-pro-image-preview',
-  'gemini-3.1-flash-image': 'google/gemini-3.1-flash-image-preview',
-  'gemini-3.1-flash-image-preview': 'google/gemini-3.1-flash-image-preview',
-  'gemini-2.5-flash-image-preview': 'google/gemini-2.5-flash-image-preview',
-  'gemini-2.0-flash': 'google/gemini-2.0-flash',
-  'gemini-2.5-flash': 'google/gemini-2.5-flash',
-  'gemini-2.5-pro': 'google/gemini-2.5-pro',
-  'imagen-3.0-generate-002': 'google/imagen-3.0-generate-002',
-};
 
 const isPlaceholderKey = (key) => !key || key === 'your_api_key_here';
 
@@ -202,22 +42,6 @@ const isValidGeminiKey = (key) =>
   typeof key === 'string' &&
   (key.startsWith('AIza') || key.startsWith('AQ.')) &&
   key.length > 10;
-
-const getImageModelsForProvider = (provider, explicitModel, modelFamily = 'gemini') => {
-  if (provider === 'openrouter') {
-    return getOpenRouterImageModels(resolveModelFamily(modelFamily), explicitModel);
-  }
-
-  return getPreferredImageModels(explicitModel);
-};
-
-const getEnhanceImageModelsForProvider = (provider, explicitModel, modelFamily = 'gemini') => {
-  if (provider === 'openrouter') {
-    return getOpenRouterEnhanceImageModels(resolveModelFamily(modelFamily), explicitModel);
-  }
-
-  return getPreferredEnhanceImageModels(explicitModel);
-};
 
 export const isModelNotFoundError = (error) =>
   error?.status === 404 ||
@@ -284,7 +108,11 @@ export const getAiApiKey = (provider = resolveAiProvider()) => {
   return isPlaceholderKey(key) ? null : key;
 };
 
-export const validateAiConfig = () => {
+/**
+ * API key checks, plus — when `task` is given — that .env names a model for it.
+ * @param {{ task?: 'vision' | 'image' | 'enhance', modelFamily?: string }} [options]
+ */
+export const validateAiConfig = ({ task, modelFamily } = {}) => {
   const provider = resolveAiProvider();
   const apiKey = getAiApiKey(provider);
 
@@ -325,12 +153,20 @@ export const validateAiConfig = () => {
     };
   }
 
-  return null;
-};
+  if (task) {
+    const missingModel = describeMissingModel(provider, resolveModelFamily(modelFamily), task);
+    if (missingModel) {
+      return {
+        status: 500,
+        body: {
+          error: missingModel,
+          instructions: 'Model names are read only from .env — see .env.example for every key.',
+        },
+      };
+    }
+  }
 
-const toOpenRouterModel = (modelName) => {
-  if (modelName.includes('/')) return modelName;
-  return OPENROUTER_MODEL_MAP[modelName] || `google/${modelName}`;
+  return null;
 };
 
 const parseGeminiParts = (parts) => {
@@ -407,7 +243,7 @@ const openRouterHeaders = (apiKey) => ({
 class OpenRouterModel {
   constructor(apiKey, modelName) {
     this.apiKey = apiKey;
-    this.modelName = toOpenRouterModel(modelName);
+    this.modelName = modelName;
   }
 
   async generateViaImageApi(prompt, imageData, mimeType) {
@@ -549,9 +385,11 @@ const isRetryableProviderError = (error) => {
   );
 };
 
-/** Try primary provider, then fall back; try multiple image models per provider on 404 */
+/**
+ * Image output (enhance / translate image): walk the primary provider's .env model chain,
+ * then the other provider's own chain when it has a key.
+ */
 export async function generateWithProviderFallback({
-  model,
   parts,
   generationConfig = {},
   modelFamily = 'gemini',
@@ -559,11 +397,7 @@ export async function generateWithProviderFallback({
 }) {
   const primary = resolveAiProvider();
   const family = resolveModelFamily(modelFamily);
-  const isEnhance = purpose === 'enhance';
-  const resolvedModel =
-    model?.trim() ||
-    (isEnhance ? getEnhanceImageModel(primary, family) : getDefaultImageModel(primary, family));
-  const envImageModel = readEnvModel(isEnhance ? 'GEMINI_ENHANCE_IMAGE_MODEL' : 'GEMINI_IMAGE_MODEL');
+  const task = purpose === 'enhance' ? 'enhance' : 'image';
 
   const alternate = primary === 'openrouter' ? 'gemini' : 'openrouter';
   const providers = [primary];
@@ -577,23 +411,22 @@ export async function generateWithProviderFallback({
     const apiKey = getAiApiKey(provider);
     if (!apiKey) continue;
 
-    const models = isEnhance
-      ? getEnhanceImageModelsForProvider(provider, resolvedModel, family)
-      : getImageModelsForProvider(provider, resolvedModel, family);
+    const models = getModelChain(provider, family, task);
+    if (models.length === 0) {
+      console.warn(`[ai-provider] Skipping ${provider}: ${describeMissingModel(provider, family, task)}`);
+      continue;
+    }
 
     for (let mi = 0; mi < models.length; mi++) {
       const modelName = models[mi];
-      const fromEnv = envImageModel && modelName === normalizeDirectImageModel(envImageModel);
 
       try {
         if (pi > 0 && mi === 0) {
-          console.warn(`[ai-provider] Retrying with ${provider} after ${primary} failed`);
+          console.warn(`[ai-provider] Retrying with ${provider} / ${modelName} after ${primary} failed`);
         } else if (mi > 0) {
           console.warn(`[ai-provider] Trying fallback model ${modelName} on ${provider}`);
         } else {
-          console.log(
-            `[ai-provider] Using ${provider} / ${modelName}${fromEnv ? ` (${isEnhance ? 'GEMINI_ENHANCE_IMAGE_MODEL' : 'GEMINI_IMAGE_MODEL'} from .env)` : model ? '' : ' (default chain)'} [${purpose}]`
-          );
+          console.log(`[ai-provider] Using ${provider} / ${modelName} [${purpose}]`);
         }
 
         const client =
@@ -622,7 +455,7 @@ export async function generateWithProviderFallback({
     }
   }
 
-  throw lastError || new Error('No AI provider available');
+  throw lastError || new Error(describeMissingModel(primary, family, task) || 'No AI provider available');
 };
 
 export const classifyAiError = (error) => {
@@ -677,10 +510,10 @@ export const classifyAiError = (error) => {
       status: 404,
       message:
         provider === 'gemini'
-          ? `Image model not available. Set GEMINI_IMAGE_MODEL=gemini-2.5-flash-image in .env (see ListModels for your account).`
+          ? 'Model not available for your Google API key. Check the GEMINI_*_MODEL names in .env against ListModels for your account.'
           : /output modalities/i.test(message)
-            ? 'This model needs the OpenRouter Image API. Set OPENROUTER_OPENAI_IMAGE_MODEL=openai/gpt-image-2 for OpenAI image editing.'
-            : 'Image model not available on OpenRouter. Check OPENROUTER_GEMINI_IMAGE_MODEL or OPENROUTER_OPENAI_IMAGE_MODEL in .env.',
+            ? 'This model cannot output images. Use an image-editing model in the OPENROUTER_*_IMAGE_MODEL keys in .env.'
+            : 'Model not available on OpenRouter. Check the OPENROUTER_*_MODEL slugs in .env.',
       details: message,
     };
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { isFormulaOnly } from "@/lib/formula";
+import { MathText } from "@/components/shared/MathText";
 import { TranslationPhaseBanner } from "./TranslationPhaseBanner";
 import type { DetectedText, TranslatedText } from "@/lib/types";
 
@@ -23,6 +25,10 @@ interface TextDetectionAndTranslationProps {
   onTranslate: (texts: DetectedText[]) => Promise<TranslatedText[]>;
   onApply: (translatedTexts: TranslatedText[]) => void;
   onBack?: () => void;
+  /** Leave the table without applying (shown when editing an already applied result) */
+  onCancel?: () => void;
+  /** Translations applied earlier — the table opens on them instead of asking to translate again */
+  initialTranslations?: TranslatedText[];
   isTranslating?: boolean;
   isApplying?: boolean;
 }
@@ -35,17 +41,29 @@ export const TextDetectionAndTranslation = ({
   onTranslate,
   onApply,
   onBack,
+  onCancel,
+  initialTranslations,
   isTranslating = false,
   isApplying = false,
 }: TextDetectionAndTranslationProps) => {
   const [originalTexts, setOriginalTexts] = useState<DetectedText[]>(detectedTexts);
-  const [translatedTexts, setTranslatedTexts] = useState<TranslatedText[]>([]);
+  const [translatedTexts, setTranslatedTexts] = useState<TranslatedText[]>(initialTranslations ?? []);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<"original" | "translated" | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [hasTranslated, setHasTranslated] = useState(false);
+  const [hasTranslated, setHasTranslated] = useState(!!initialTranslations?.length);
+
+  // Our own edits echo back through detectedTexts — only a fresh detection should reset the table
+  const syncedTexts = useRef(detectedTexts);
+
+  const pushTextsUpdate = (texts: DetectedText[]) => {
+    syncedTexts.current = texts;
+    onTextsUpdate(texts);
+  };
 
   useEffect(() => {
+    if (detectedTexts === syncedTexts.current) return;
+    syncedTexts.current = detectedTexts;
     if (detectedTexts.length > 0) {
       setOriginalTexts(detectedTexts);
       setTranslatedTexts([]);
@@ -80,7 +98,7 @@ export const TextDetectionAndTranslation = ({
         t.id === id ? { ...t, text: editValue.trim() || t.text, confidence: 1 } : t
       );
       setOriginalTexts(updated);
-      onTextsUpdate(updated);
+      pushTextsUpdate(updated);
       if (hasTranslated) {
         setTranslatedTexts([]);
         setHasTranslated(false);
@@ -98,7 +116,7 @@ export const TextDetectionAndTranslation = ({
   const removeText = (id: string) => {
     const updated = originalTexts.filter((t) => t.id !== id);
     setOriginalTexts(updated);
-    onTextsUpdate(updated);
+    pushTextsUpdate(updated);
     setTranslatedTexts((prev) => prev.filter((t) => t.id !== id));
     if (updated.length === 0) setHasTranslated(false);
   };
@@ -150,7 +168,7 @@ export const TextDetectionAndTranslation = ({
         description={
           hasTranslated
             ? `Make sure each ${targetLanguageName} line is correct, then apply it to the image. The original Russian text will be replaced in place.`
-            : `We found ${originalTexts.length} text block${originalTexts.length === 1 ? "" : "s"}. Fix any OCR mistakes, then translate to ${targetLanguageName}.`
+            : `We found ${originalTexts.length} text block${originalTexts.length === 1 ? "" : "s"}. Fix any OCR mistakes — check that formulas show the right powers, subscripts and fractions — then translate to ${targetLanguageName}.`
         }
       />
 
@@ -203,6 +221,10 @@ export const TextDetectionAndTranslation = ({
               const isLowConfidence = item.confidence < 0.7;
               const isEditingOriginal = editingId === item.id && editingField === "original";
               const isEditingTranslated = editingId === item.id && editingField === "translated";
+              const formulaOnly = isFormulaOnly(item.text);
+              const keptAsIs =
+                formulaOnly &&
+                translation?.translatedText?.replace(/\s+/g, " ").trim() === item.text.replace(/\s+/g, " ").trim();
 
               return (
                 <div
@@ -226,9 +248,12 @@ export const TextDetectionAndTranslation = ({
                         <Textarea
                           value={editValue}
                           onChange={(e) => setEditValue(e.target.value)}
-                          className="min-h-[52px] text-sm"
+                          className="min-h-[52px] text-sm font-mono"
                           autoFocus
                         />
+                        <p className="text-[10px] text-muted-foreground leading-snug">
+                          Formulas go between $…$ in LaTeX: $x^2$, $H_2SO_4$, $\frac{"{a}{b}"}$
+                        </p>
                         <div className="flex gap-1">
                           <Button size="sm" className="h-7 text-xs" onClick={() => saveEdit(item.id)}>
                             Save
@@ -239,7 +264,14 @@ export const TextDetectionAndTranslation = ({
                         </div>
                       </div>
                     ) : (
-                      <p className="leading-snug break-words">{item.text || "—"}</p>
+                      <div className="space-y-1">
+                        <p className="leading-snug break-words">{item.text ? <MathText text={item.text} /> : "—"}</p>
+                        {formulaOnly && (
+                          <span className="inline-block rounded border border-primary/30 bg-primary/5 px-1.5 py-px text-[10px] font-medium text-primary">
+                            Formula · kept as is
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -263,8 +295,17 @@ export const TextDetectionAndTranslation = ({
                           </div>
                         </div>
                       ) : (
-                        <p className="leading-snug break-words text-foreground">
-                          {translation?.translatedText?.trim() || "—"}
+                        <p
+                          className={cn(
+                            "leading-snug break-words",
+                            keptAsIs ? "text-muted-foreground" : "text-foreground"
+                          )}
+                        >
+                          {translation?.translatedText?.trim() ? (
+                            <MathText text={translation.translatedText.trim()} />
+                          ) : (
+                            "—"
+                          )}
                         </p>
                       )}
                     </div>
@@ -315,6 +356,11 @@ export const TextDetectionAndTranslation = ({
       </div>
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 border-t border-border/40">
+        {onCancel && (
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={isTranslating || isApplying}>
+            Back to result
+          </Button>
+        )}
         {onBack && (
           <Button variant="ghost" size="sm" onClick={onBack} disabled={isTranslating || isApplying}>
             Upload different image

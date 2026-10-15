@@ -7,9 +7,8 @@ import cors from 'cors';
 import {
   createGenerativeAI,
   generateWithProviderFallback,
-  getDefaultVisionModel,
-  getEnhanceImageModel,
-  getPreferredVisionModels,
+  getModelsFor,
+  getTranslationModelFamily,
   isModelNotFoundError,
   validateAiConfig,
   classifyAiError,
@@ -26,7 +25,9 @@ import {
 import { renderTranslatedImage } from './lib/translate-image-render.js';
 import { getLanguageName, normaliseTextPairs } from './lib/normalise-text-pairs.js';
 import { enhancementPrompts, getEnhancementModesList, buildEnhancementPrompt } from './lib/enhancement-modes.js';
-import { TEXTBOOK_OCR_PROMPT } from './lib/textbook-prompts.js';
+import { buildOcrPrompt } from './lib/textbook-prompts.js';
+import { resolveSubject } from './lib/subject-rules.js';
+import { parseDetectedTexts } from './lib/ocr-parse.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -59,7 +60,7 @@ app.post('/api/enhance-image', async (req, res) => {
       return res.status(400).json({ error: 'No image provided' });
     }
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'enhance', modelFamily });
     if (configError) {
       return res.status(configError.status).json(configError.body);
     }
@@ -80,7 +81,6 @@ app.post('/api/enhance-image', async (req, res) => {
       const base64Data = image.split(',')[1] || image;
       const family = resolveModelFamily(modelFamily);
       const result = await generateWithProviderFallback({
-        model: getEnhanceImageModel(undefined, family),
         parts: [
           prompt,
           { inlineData: { data: base64Data, mimeType } },
@@ -144,28 +144,25 @@ app.post('/api/enhance-image', async (req, res) => {
 // Text detection endpoint
 app.post('/api/detect-text', async (req, res) => {
   try {
-    const { image, model: requestedModel, modelFamily } = req.body;
-    
+    const { image, model: requestedModel, subject } = req.body;
+    const modelFamily = getTranslationModelFamily();
+
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
     }
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'vision', modelFamily });
     if (configError) {
       return res.status(configError.status).json(configError.body);
     }
 
-    const family = resolveModelFamily(modelFamily);
-    const provider = resolveAiProvider();
-    const availableModels = getPreferredVisionModels(family, provider);
-    const configuredVisionModel = process.env.GEMINI_VISION_MODEL?.trim();
+    const availableModels = getModelsFor('vision', modelFamily);
+    const configuredVisionModel = availableModels[0];
 
     const modelName =
-      requestedModel && availableModels.includes(requestedModel)
-        ? requestedModel
-        : getDefaultVisionModel(provider, family);
+      requestedModel && availableModels.includes(requestedModel) ? requestedModel : configuredVisionModel;
 
-    const prompt = TEXTBOOK_OCR_PROMPT;
+    const prompt = buildOcrPrompt(resolveSubject(subject));
 
     // Initialize Google Generative AI
     const genAI = createGenerativeAI();
@@ -224,11 +221,9 @@ app.post('/api/detect-text', async (req, res) => {
               text = response.text();
               actualModelName = fallbackName;
               console.log(`Successfully used fallback model: ${fallbackName}`);
-              if (configuredVisionModel && fallbackName !== configuredVisionModel) {
-                console.warn(
-                  `[detect-text] ⚠️  Fell back from GEMINI_VISION_MODEL="${configuredVisionModel}" to "${fallbackName}"`
-                );
-              }
+              console.warn(
+                `[detect-text] ⚠️  Fell back from configured vision model "${configuredVisionModel}" to "${fallbackName}"`
+              );
               break;
             } catch (fallbackError) {
               console.warn(`Fallback ${fallbackName} failed:`, fallbackError.message);
@@ -241,76 +236,13 @@ app.post('/api/detect-text', async (req, res) => {
         }
       }
       
-      // Try to parse JSON from response with multiple strategies
-      let detectedTexts = [];
-      try {
-        // Strategy 1: Extract JSON from markdown code blocks
-        const jsonMatch = text.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
-        if (jsonMatch) {
-          detectedTexts = JSON.parse(jsonMatch[1]);
-        } else {
-          // Strategy 2: Find JSON array in the text
-          const arrayMatch = text.match(/\[[\s\S]*\]/);
-          if (arrayMatch) {
-            detectedTexts = JSON.parse(arrayMatch[0]);
-          } else {
-            // Strategy 3: Try parsing the entire response as JSON
-            detectedTexts = JSON.parse(text.trim());
-          }
-        }
-      } catch (parseError) {
-        console.warn('JSON parsing failed, attempting fallback extraction:', parseError.message);
-        // Fallback: Try to extract structured data from text response
-        // Look for patterns like: "text": "...", "confidence": ...
-        try {
-          const textMatches = Array.from(text.matchAll(/"text"\s*:\s*"([^"]+)"/g));
-          const confidenceMatches = Array.from(text.matchAll(/"confidence"\s*:\s*([\d.]+)/g));
-          
-          const texts = textMatches.map(m => m[1]);
-          const confidences = confidenceMatches.map(m => parseFloat(m[1]));
-          
-          if (texts.length > 0) {
-            detectedTexts = texts.map((text, index) => ({
-              text: text,
-              confidence: confidences[index] || 0.7,
-            }));
-          } else {
-            // Last resort: Split by lines and create basic text blocks
-            const lines = text.split('\n')
-              .filter(line => line.trim().length > 0)
-              .filter(line => !line.match(/^[\[\]{}",\s]*$/)) // Filter out JSON structure lines
-              .slice(0, 50); // Limit to 50 lines
-            
-            detectedTexts = lines.map((line, index) => ({
-              id: `text-${index + 1}`,
-              text: line.trim().replace(/^["']|["']$/g, ''), // Remove quotes
-              confidence: 0.7,
-            }));
-          }
-        } catch (fallbackError) {
-          console.error('Fallback extraction also failed:', fallbackError);
-          detectedTexts = [];
-        }
-      }
+      const detectedTexts = parseDetectedTexts(text);
 
-      // Ensure we have an array with proper structure
-      if (!Array.isArray(detectedTexts)) {
-        detectedTexts = [];
-      }
-
-      // Add IDs and ensure proper structure
-      detectedTexts = detectedTexts.map((item, index) => ({
-        id: item.id || `text-${index + 1}`,
-        text: item.text || String(item),
-        confidence: typeof item.confidence === 'number' ? item.confidence : 0.7,
-        boundingBox: item.boundingBox || undefined,
-      }));
-
-            return res.json({ 
-              detectedTexts,
-              message: `Detected ${detectedTexts.length} text block(s) using ${actualModelName}`,
-              model: actualModelName,
-            });
+      return res.json({
+        detectedTexts,
+        message: `Detected ${detectedTexts.length} text block(s) using ${actualModelName}`,
+        model: actualModelName,
+      });
 
     } catch (error) {
       console.error('Gemini API error:', error);
@@ -331,13 +263,14 @@ app.post('/api/detect-text', async (req, res) => {
 // Text translation endpoint (translates text only, not images)
 app.post('/api/translate-text', async (req, res) => {
   try {
-    const { texts, targetLanguage = 'en', modelFamily } = req.body;
+    const { texts, targetLanguage = 'en', subject } = req.body;
+    const modelFamily = getTranslationModelFamily();
 
     if (!texts || !Array.isArray(texts) || texts.length === 0) {
       return res.status(400).json({ error: 'No texts provided' });
     }
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'vision', modelFamily });
     if (configError) {
       return res.status(configError.status).json(configError.body);
     }
@@ -349,7 +282,8 @@ app.post('/api/translate-text', async (req, res) => {
       const { translations, sanitizedCount, targetLanguageName } = await translator.translateTexts({
         texts,
         targetLanguage,
-        modelFamily: resolveModelFamily(modelFamily),
+        modelFamily,
+        subject,
       });
 
       if (sanitizedCount === 0) {
@@ -388,15 +322,15 @@ app.post('/api/translate-image', async (req, res) => {
       targetLanguage = 'en',
       translatedTexts: translatedTextPairs,
       correctedTexts,
-      quality = 'premium',
-      modelFamily,
+      subject,
     } = req.body;
-    
+    const modelFamily = getTranslationModelFamily();
+
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
     }
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'image', modelFamily });
     if (configError) {
       return res.status(configError.status).json(configError.body);
     }
@@ -410,12 +344,12 @@ app.post('/api/translate-image', async (req, res) => {
         textPairs,
         targetLanguage,
         targetLangName,
-        quality,
         correctedTexts,
-        modelFamily: resolveModelFamily(modelFamily),
+        modelFamily,
+        subject,
       });
 
-      if (result.method !== 'ai-image' || !result.translatedImage) {
+      if (!result.translatedImage) {
         return res.status(422).json({
           error: result.message || 'Could not replace text on image',
           method: result.method,

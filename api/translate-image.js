@@ -1,5 +1,5 @@
 import '../server/load-env.js';
-import { validateAiConfig, classifyAiError, resolveModelFamily } from '../server/lib/ai-provider.js';
+import { validateAiConfig, classifyAiError, getTranslationModelFamily } from '../server/lib/ai-provider.js';
 import { renderTranslatedImage } from '../server/lib/translate-image-render.js';
 import { getLanguageName, normaliseTextPairs } from '../server/lib/normalise-text-pairs.js';
 
@@ -29,9 +29,9 @@ export default async function handler(req, res) {
       targetLanguage = 'en',
       translatedTexts,
       correctedTexts,
-      quality = 'premium',
-      modelFamily,
+      subject,
     } = req.body ?? {};
+    const modelFamily = getTranslationModelFamily();
 
     if (!image || typeof image !== 'string') {
       res.status(400).json({ error: 'No image provided' });
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
     const textPairs = normaliseTextPairs(translatedTexts);
     const targetLangName = getLanguageName(targetLanguage);
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'image', modelFamily });
     if (configError) {
       res.status(configError.status).json(configError.body);
       return;
@@ -50,7 +50,6 @@ export default async function handler(req, res) {
     console.log('translate-image: Prepared translation request', {
       targetLanguage: targetLangName,
       textPairs: textPairs.length,
-      quality,
     });
 
     try {
@@ -59,12 +58,12 @@ export default async function handler(req, res) {
         textPairs,
         targetLanguage,
         targetLangName,
-        quality,
         correctedTexts,
-        modelFamily: resolveModelFamily(modelFamily),
+        modelFamily,
+        subject,
       });
 
-      if (result.method !== 'ai-image' || !result.translatedImage) {
+      if (!result.translatedImage) {
         res.status(422).json({
           error: result.message || 'Could not replace text on image',
           method: result.method,

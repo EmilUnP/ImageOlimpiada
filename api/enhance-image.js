@@ -2,7 +2,6 @@ import {
   generateWithProviderFallback,
   validateAiConfig,
   classifyAiError,
-  getEnhanceImageModel,
   resolveModelFamily,
 } from '../server/lib/ai-provider.js';
 import { enhancementPrompts, buildEnhancementPrompt } from '../server/lib/enhancement-modes.js';
@@ -30,7 +29,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No image provided' });
     }
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'enhance', modelFamily });
     if (configError) {
       return res.status(configError.status).json(configError.body);
     }
@@ -51,7 +50,6 @@ export default async function handler(req, res) {
       const base64Data = image.split(',')[1] || image;
       const family = resolveModelFamily(modelFamily);
       const result = await generateWithProviderFallback({
-        model: getEnhanceImageModel(undefined, family),
         parts: [
           prompt,
           { inlineData: { data: base64Data, mimeType } },

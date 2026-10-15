@@ -1,18 +1,32 @@
 import '../load-env.js';
 
+/**
+ * Every model name comes from .env (see .env.example) — there are no built-in defaults.
+ *
+ * One key pattern per provider:
+ *   gemini (Google API directly):  GEMINI_<TASK>_MODEL
+ *   openrouter:                    OPENROUTER_<FAMILY>_<TASK>_MODEL   (FAMILY = GEMINI | OPENAI)
+ * TASK: VISION (OCR + text translation), IMAGE (translate image), ENHANCE_IMAGE (enhance; falls back to IMAGE).
+ * Optional fallbacks: the same key ending in _MODELS (comma-separated), tried after the primary.
+ */
+
 /** @typedef {'gemini' | 'openai'} ModelFamily */
+/** @typedef {'vision' | 'image' | 'enhance'} ModelTask */
 
 export const MODEL_FAMILIES = /** @type {const} */ (['gemini', 'openai']);
 
-const OPENROUTER_FAMILY_DEFAULTS = {
-  gemini: {
-    image: 'google/gemini-2.5-flash-image-preview',
-    vision: 'google/gemini-2.5-pro',
-  },
-  openai: {
-    image: 'openai/gpt-image-2',
-    vision: 'openai/gpt-4o',
-  },
+const MODEL_TASKS = /** @type {const} */ (['vision', 'enhance', 'image']);
+
+const TASK_ENV_NAMES = {
+  vision: 'VISION',
+  image: 'IMAGE',
+  enhance: 'ENHANCE_IMAGE',
+};
+
+const TASK_LABELS = {
+  vision: 'OCR / text translation',
+  image: 'translate-image',
+  enhance: 'enhance',
 };
 
 const FAMILY_LABELS = {
@@ -49,104 +63,82 @@ export const getDefaultModelFamily = () => {
 
 /** @param {string | undefined | null} requested */
 export const resolveModelFamily = (requested) => {
-  const families = parseUiModelFamilies();
   const normalized = typeof requested === 'string' ? requested.trim().toLowerCase() : '';
-  if (normalized && families.includes(/** @type {ModelFamily} */ (normalized))) {
+  if (normalized && MODEL_FAMILIES.includes(/** @type {ModelFamily} */ (normalized))) {
     return /** @type {ModelFamily} */ (normalized);
   }
   return getDefaultModelFamily();
 };
 
-const familyEnvPrefix = (family) => {
-  if (family === 'openai') return 'OPENROUTER_OPENAI';
-  return 'OPENROUTER_GEMINI';
+/**
+ * Translation (OCR, text translation, image render) is not user-selectable:
+ * it always uses TRANSLATION_MODEL_FAMILY from .env (gemini | openai), OpenAI when unset.
+ * Only applies with OpenRouter — direct Gemini always uses the GEMINI_* keys.
+ * @returns {ModelFamily}
+ */
+export const getTranslationModelFamily = () => {
+  const configured = readEnvModel('TRANSLATION_MODEL_FAMILY')?.toLowerCase();
+  return MODEL_FAMILIES.includes(/** @type {ModelFamily} */ (configured))
+    ? /** @type {ModelFamily} */ (configured)
+    : 'openai';
 };
 
-const familyEnvKey = (family, task) => `${familyEnvPrefix(family)}_${task}_MODEL`;
+const envPrefix = (provider, family) =>
+  provider === 'openrouter' ? `OPENROUTER_${family === 'openai' ? 'OPENAI' : 'GEMINI'}` : 'GEMINI';
 
-const familyEnvListKey = (family, task) => `${familyEnvPrefix(family)}_${task}_MODELS`;
+/** The .env key holding the primary model for a provider / family / task */
+export const getModelEnvKey = (provider, family, task) =>
+  `${envPrefix(provider, family)}_${TASK_ENV_NAMES[task]}_MODEL`;
 
-/** ENHANCE_IMAGE keys: OPENROUTER_GEMINI|OPENAI_ENHANCE_IMAGE_MODEL */
+const dedupe = (list) => [...new Set(list)];
 
-/** @param {ModelFamily} family */
-export const getOpenRouterImageModel = (family = 'gemini') => {
-  const fromFamily = readEnvModel(familyEnvKey(family, 'IMAGE'));
-  if (fromFamily) return fromFamily;
+const readTaskChain = (provider, family, task) => {
+  const key = getModelEnvKey(provider, family, task);
+  const list = readEnvModel(`${key}S`);
+  const chain = [readEnvModel(key), ...(list ? parseCommaList(list) : [])].filter(Boolean);
 
-  if (family === 'gemini') {
+  // Legacy alias for the OpenRouter Gemini image model
+  if (chain.length === 0 && provider === 'openrouter' && family === 'gemini' && task === 'image') {
     const legacy = readEnvModel('IMAGE_MODEL');
-    if (legacy) return legacy;
+    if (legacy) chain.push(legacy);
   }
 
-  return OPENROUTER_FAMILY_DEFAULTS[family].image;
+  return dedupe(chain);
 };
 
-/** @param {ModelFamily} family */
-export const getOpenRouterVisionModel = (family = 'gemini') => {
-  const fromFamily = readEnvModel(familyEnvKey(family, 'VISION'));
-  if (fromFamily) return fromFamily;
+/**
+ * Models to try, in order — empty when .env does not configure the task.
+ * @param {'gemini' | 'openrouter'} provider
+ * @param {ModelFamily} family
+ * @param {ModelTask} task
+ */
+export const getModelChain = (provider, family, task) => {
+  const chain = readTaskChain(provider, family, task);
 
-  if (family === 'gemini') {
-    const legacy = readEnvModel('GEMINI_VISION_MODEL');
-    if (legacy) return legacy;
+  if (task === 'enhance' && chain.length === 0) {
+    return readTaskChain(provider, family, 'image');
   }
 
-  return OPENROUTER_FAMILY_DEFAULTS[family].vision;
-};
-
-/** @param {ModelFamily} family */
-export const getOpenRouterEnhanceImageModel = (family = 'gemini') => {
-  const fromFamily = readEnvModel(familyEnvKey(family, 'ENHANCE_IMAGE'));
-  if (fromFamily) return fromFamily;
-  return getOpenRouterImageModel(family);
-};
-
-/** @param {ModelFamily} family */
-export const getOpenRouterEnhanceImageModels = (family = 'gemini', explicitModel) => {
-  if (explicitModel?.trim()) return [explicitModel.trim()];
-
-  const list = readEnvModel(familyEnvListKey(family, 'ENHANCE_IMAGE'));
-  if (list) return parseCommaList(list);
-
-  return [getOpenRouterEnhanceImageModel(family)];
-};
-
-/** @param {ModelFamily} family */
-export const getOpenRouterImageModels = (family = 'gemini', explicitModel) => {
-  if (explicitModel?.trim()) return [explicitModel.trim()];
-
-  const list = readEnvModel(familyEnvListKey(family, 'IMAGE'));
-  if (list) return parseCommaList(list);
-
-  const models = [getOpenRouterImageModel(family)];
-
-  // Optional fallback if OpenAI Image API fails (set OPENROUTER_OPENAI_IMAGE_FALLBACK_TO_GEMINI=false to disable)
-  const allowGeminiFallback =
-    family === 'openai' && readEnvModel('OPENROUTER_OPENAI_IMAGE_FALLBACK_TO_GEMINI') !== 'false';
-  if (allowGeminiFallback) {
-    const geminiPrimary = getOpenRouterImageModel('gemini');
-    if (!models.includes(geminiPrimary)) models.push(geminiPrimary);
-
-    const geminiList = readEnvModel(familyEnvListKey('gemini', 'IMAGE'));
-    if (geminiList) {
-      for (const slug of parseCommaList(geminiList)) {
-        if (!models.includes(slug)) models.push(slug);
-      }
-    }
+  // Opt-in: let OpenAI image edits fall back to the Gemini image models (OPENROUTER_OPENAI_IMAGE_FALLBACK_TO_GEMINI=true)
+  if (
+    provider === 'openrouter' &&
+    family === 'openai' &&
+    task === 'image' &&
+    readEnvModel('OPENROUTER_OPENAI_IMAGE_FALLBACK_TO_GEMINI') === 'true'
+  ) {
+    return dedupe([...chain, ...readTaskChain(provider, 'gemini', 'image')]);
   }
 
-  return models;
+  return chain;
 };
 
-/** @param {ModelFamily} family */
-export const getOpenRouterVisionModels = (family = 'gemini', explicitModel) => {
-  if (explicitModel?.trim()) return [explicitModel.trim()];
+/** What to set in .env when a task has no model, or null when it is configured */
+export const describeMissingModel = (provider, family, task) => {
+  if (getModelChain(provider, family, task).length > 0) return null;
 
-  const list = readEnvModel(familyEnvListKey(family, 'VISION'));
-  if (list) return parseCommaList(list);
-
-  const primary = getOpenRouterVisionModel(family);
-  return [primary];
+  const key = getModelEnvKey(provider, family, task);
+  const alternative = task === 'enhance' ? ` or ${getModelEnvKey(provider, family, 'image')}` : '';
+  return `No ${TASK_LABELS[task]} model configured. Set ${key}${alternative} in .env (see .env.example).`;
 };
 
 /**
@@ -195,6 +187,8 @@ export const getPublicAiConfig = (resolvedProvider) => {
   const configuredProvider = getConfiguredAiProvider();
   const uiProvider = configuredProvider || resolvedProvider;
 
+  const translationFamily = getTranslationModelFamily();
+
   return {
     provider: resolvedProvider,
     configuredProvider: uiProvider,
@@ -204,15 +198,40 @@ export const getPublicAiConfig = (resolvedProvider) => {
       label: FAMILY_LABELS[id] || id,
     })),
     defaultModelFamily: defaultFamily,
+    translationModelLabel: uiProvider === 'openrouter' ? FAMILY_LABELS[translationFamily] : 'Gemini',
   };
 };
 
-export const logOpenRouterModelConfig = () => {
-  for (const family of MODEL_FAMILIES) {
-    console.log(`  OpenRouter ${family} enhance: ${getOpenRouterEnhanceImageModel(family)}`);
-    console.log(`  OpenRouter ${family} image:   ${getOpenRouterImageModel(family)}`);
-    console.log(`  OpenRouter ${family} vision:  ${getOpenRouterVisionModel(family)}`);
+/** Startup log of every model chain read from .env, flagging gaps */
+export const logModelConfig = (provider) => {
+  const families =
+    provider === 'openrouter' ? dedupe([...parseUiModelFamilies(), getTranslationModelFamily()]) : ['gemini'];
+
+  console.log('[ai-provider] ── Model configuration (.env) ──');
+  console.log(`  Provider:           ${provider}`);
+
+  for (const family of families) {
+    for (const task of MODEL_TASKS) {
+      const chain = getModelChain(provider, family, task);
+      const label = provider === 'openrouter' ? `${family} ${task}` : task;
+      console.log(`  ${`${label}:`.padEnd(20)}${chain.length ? chain.join(' → ') : `⚠️  not set — ${describeMissingModel(provider, family, task)}`}`);
+
+      if (provider === 'openrouter') {
+        for (const model of chain.filter((m) => !m.includes('/'))) {
+          console.warn(`  ⚠️  "${model}" is not an OpenRouter slug (expected provider/model, e.g. google/…)`);
+        }
+      }
+    }
   }
-  console.log(`  UI families:               ${parseUiModelFamilies().join(', ')}`);
-  console.log(`  Default UI family:         ${getDefaultModelFamily()}`);
+
+  if (provider === 'openrouter') {
+    const translationFamily = getTranslationModelFamily();
+    console.log(`  Translation:        ${translationFamily} only (TRANSLATION_MODEL_FAMILY)`);
+    for (const task of ['vision', 'image']) {
+      const missing = describeMissingModel(provider, translationFamily, task);
+      if (missing) console.warn(`  ⚠️  Translation will fail: ${missing}`);
+    }
+    console.log(`  Enhance UI families: ${parseUiModelFamilies().join(', ')} (default ${getDefaultModelFamily()})`);
+  }
+  console.log('[ai-provider] ─────────────────────────────────');
 };

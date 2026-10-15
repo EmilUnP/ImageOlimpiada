@@ -3,12 +3,12 @@ import {
   createGenerativeAI,
   validateAiConfig,
   classifyAiError,
-  getPreferredVisionModels,
-  getDefaultVisionModel,
-  resolveModelFamily,
-  resolveAiProvider,
+  getModelsFor,
+  getTranslationModelFamily,
 } from '../server/lib/ai-provider.js';
-import { TEXTBOOK_OCR_PROMPT } from '../server/lib/textbook-prompts.js';
+import { buildOcrPrompt } from '../server/lib/textbook-prompts.js';
+import { resolveSubject } from '../server/lib/subject-rules.js';
+import { parseDetectedTexts } from '../server/lib/ocr-parse.js';
 
 const GENERATION_CONFIG = {
   temperature: 0.1,
@@ -16,8 +16,6 @@ const GENERATION_CONFIG = {
   topK: 40,
   maxOutputTokens: 8192,
 };
-
-const TEXT_DETECTION_PROMPT = TEXTBOOK_OCR_PROMPT;
 
 const extractMimeType = (base64Image, fallback = 'image/jpeg') => {
   if (typeof base64Image !== 'string') return fallback;
@@ -29,75 +27,6 @@ const extractBase64Data = (base64Image) => {
   if (typeof base64Image !== 'string') return '';
   const parts = base64Image.split(',');
   return parts.length > 1 ? parts[1] : parts[0];
-};
-
-const parseDetectedTexts = (rawText) => {
-  if (!rawText || typeof rawText !== 'string') return [];
-
-  const codeBlockMatch = rawText.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/i);
-  const arrayMatch = rawText.match(/\[[\s\S]*\]/);
-  let jsonToParse = null;
-
-  if (codeBlockMatch) {
-    jsonToParse = codeBlockMatch[1];
-  } else if (arrayMatch) {
-    jsonToParse = arrayMatch[0];
-  }
-
-  let parsed = [];
-  if (jsonToParse) {
-    try {
-      parsed = JSON.parse(jsonToParse);
-    } catch (error) {
-      console.warn('Failed to parse JSON array from Gemini response. Falling back to heuristic parsing.', error);
-    }
-  }
-
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    const textMatches = [...rawText.matchAll(/"text"\s*:\s*"([^"]+)"/g)];
-    if (textMatches.length > 0) {
-      parsed = textMatches.map((match, index) => ({
-        id: `text-${index + 1}`,
-        text: match[1],
-        confidence: 0.7,
-      }));
-    } else {
-      const lines = rawText
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !/^[\[\]{}",]*$/.test(line))
-        .slice(0, 50);
-
-      parsed = lines.map((line, index) => ({
-        id: `text-${index + 1}`,
-        text: line.replace(/^["']|["']$/g, ''),
-        confidence: 0.7,
-      }));
-    }
-  }
-
-  return parsed
-    .filter((item) => item && typeof item === 'object')
-    .map((item, index) => ({
-      id: typeof item.id === 'string' && item.id.length > 0 ? item.id : `text-${index + 1}`,
-      text: typeof item.text === 'string' ? item.text : '',
-      confidence:
-        typeof item.confidence === 'number' && Number.isFinite(item.confidence)
-          ? Math.max(0, Math.min(1, item.confidence))
-          : 0.7,
-      boundingBox:
-        item.boundingBox &&
-        typeof item.boundingBox === 'object' &&
-        ['x', 'y', 'width', 'height'].every((key) => typeof item.boundingBox[key] === 'number')
-          ? {
-              x: item.boundingBox.x,
-              y: item.boundingBox.y,
-              width: item.boundingBox.width,
-              height: item.boundingBox.height,
-            }
-          : undefined,
-    }))
-    .filter((item) => item.text && item.text.trim().length > 0);
 };
 
 export default async function handler(req, res) {
@@ -117,27 +46,25 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { image, model: requestedModel, modelFamily } = req.body ?? {};
+    const { image, model: requestedModel, subject } = req.body ?? {};
+    const modelFamily = getTranslationModelFamily();
 
     if (!image || typeof image !== 'string') {
       res.status(400).json({ error: 'No image provided' });
       return;
     }
 
-    const configError = validateAiConfig();
+    const configError = validateAiConfig({ task: 'vision', modelFamily });
     if (configError) {
       res.status(configError.status).json(configError.body);
       return;
     }
 
-    const family = resolveModelFamily(modelFamily);
-    const provider = resolveAiProvider();
-    const visionModels = getPreferredVisionModels(family, provider);
+    const visionModels = getModelsFor('vision', modelFamily);
     const preferredModel =
-      requestedModel && visionModels.includes(requestedModel)
-        ? requestedModel
-        : getDefaultVisionModel(provider, family);
+      requestedModel && visionModels.includes(requestedModel) ? requestedModel : visionModels[0];
 
+    const prompt = buildOcrPrompt(resolveSubject(subject));
     const genAI = createGenerativeAI();
     const triedModels = new Set();
     let usedModel = preferredModel;
@@ -158,7 +85,7 @@ export default async function handler(req, res) {
         const model = genAI.getGenerativeModel({ model: modelName });
         const result = await model.generateContent(
           [
-            TEXT_DETECTION_PROMPT,
+            prompt,
             { inlineData: { data: base64Data, mimeType } },
           ],
           { generationConfig: GENERATION_CONFIG },

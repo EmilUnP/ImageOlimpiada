@@ -4,6 +4,16 @@ export const LANGUAGES = [
   { code: 'az', name: 'Azerbaijani', flagCode: 'AZ' },
 ] as const;
 
+/** Subject for the translation pipeline — must match server/lib/subject-rules.js */
+export const SUBJECTS = [
+  { id: 'auto', name: 'Auto', emoji: '✨' },
+  { id: 'math', name: 'Math', emoji: '📐' },
+  { id: 'physics', name: 'Physics', emoji: '⚛️' },
+  { id: 'chemistry', name: 'Chemistry', emoji: '🧪' },
+  { id: 'biology', name: 'Biology', emoji: '🧬' },
+  { id: 'general', name: 'Text / other', emoji: '📖' },
+] as const;
+
 export const ENHANCEMENT_STYLES = [
   { id: 'textbook', name: 'Book question', emoji: '📚', description: 'Default — any subject, full page or crop' },
   { id: 'document', name: 'Document', emoji: '📄', description: 'Mostly text — worksheets and handouts' },
