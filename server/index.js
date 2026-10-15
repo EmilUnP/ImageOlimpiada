@@ -16,6 +16,8 @@ import {
   logActiveModelConfig,
   resolveModelFamily,
   getPublicAiConfig,
+  createDeadline,
+  isTimeoutError,
 } from './lib/ai-provider.js';
 import {
   createTextTranslationService,
@@ -195,6 +197,7 @@ app.post('/api/detect-text', async (req, res) => {
       let result;
       let response;
       let text;
+      const deadline = createDeadline();
       
       try {
         result = await model.generateContent(
@@ -202,7 +205,7 @@ app.post('/api/detect-text', async (req, res) => {
             prompt,
             { inlineData: { data: base64Data, mimeType } }
           ],
-          { generationConfig }
+          { generationConfig, ...deadline.requestOptions() }
         );
         response = await result.response;
         text = response.text();
@@ -215,7 +218,7 @@ app.post('/api/detect-text', async (req, res) => {
               const fallbackModel = genAI.getGenerativeModel({ model: fallbackName });
               result = await fallbackModel.generateContent(
                 [prompt, { inlineData: { data: base64Data, mimeType } }],
-                { generationConfig }
+                { generationConfig, ...deadline.requestOptions() }
               );
               response = await result.response;
               text = response.text();
@@ -246,6 +249,10 @@ app.post('/api/detect-text', async (req, res) => {
 
     } catch (error) {
       console.error('Gemini API error:', error);
+      if (isTimeoutError(error)) {
+        const aiError = classifyAiError(error);
+        return res.status(aiError.status).json({ error: aiError.message, details: aiError.details });
+      }
       return res.status(500).json({ 
         error: 'Failed to detect text in image',
         details: error.message || 'Unknown error'
@@ -359,6 +366,7 @@ app.post('/api/translate-image', async (req, res) => {
       return res.json({
         translatedImage: result.translatedImage,
         message: result.message,
+        warning: result.warning,
         targetLanguage: targetLangName,
         method: result.method,
         appliedCount: result.appliedCount,

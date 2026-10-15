@@ -127,12 +127,17 @@ const FORMULA_RENDER_RULES = `FORMULAS AND NOTATION — CRITICAL:
 - Never draw $ signs, backslashes, curly braces, or LaTeX command names (\\frac, \\sqrt, \\text…) on the image
 - Only the words around the math change language`;
 
+// The render step pads odd aspect ratios to one the image model outputs natively (see image-fidelity.js)
+const PADDED_CANVAS_RULE =
+  '- The scan is centred on a plain margin of its own paper colour, added only for processing. Leave that margin plain and empty — do not extend the scan into it or draw anything there';
+
 export const buildImageTextReplacementPrompt = ({
   textPairs = [],
   protectedTexts = [],
   correctedTexts = [],
   targetLangName = 'English',
   subject = 'auto',
+  paddedCanvas = false,
 }) => {
   const { name, rules } = getSubjectRules(subject, 'render', targetLangName);
 
@@ -157,6 +162,12 @@ STRICT RULES:
 - Never move text to a different location on the image
 - Keep image size, crop, and all non-text content unchanged
 
+EVERYTHING ELSE STAYS PIXEL-IDENTICAL:
+- Same canvas: same framing, zoom and aspect ratio — no added borders, bars, bands, frames, panels, margins, shadows, titles or watermarks
+- Do not redraw, move, resize, recolor or restyle any shape, box, line, arrow, table, diagram, photo or drawing
+- Do not enhance the image: no sharpening, denoising, upscaling, recoloring, or brightness/contrast change — keep the paper tone, scan grain, stains and blur exactly as they are
+- Every area outside the replaced words must look exactly like the input
+${paddedCanvas ? `${PADDED_CANVAS_RULE}\n` : ''}
 ${FORMULA_RENDER_RULES}
 `;
 

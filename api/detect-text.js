@@ -5,6 +5,8 @@ import {
   classifyAiError,
   getModelsFor,
   getTranslationModelFamily,
+  createDeadline,
+  isTimeoutError,
 } from '../server/lib/ai-provider.js';
 import { buildOcrPrompt } from '../server/lib/textbook-prompts.js';
 import { resolveSubject } from '../server/lib/subject-rules.js';
@@ -67,6 +69,7 @@ export default async function handler(req, res) {
     const prompt = buildOcrPrompt(resolveSubject(subject));
     const genAI = createGenerativeAI();
     const triedModels = new Set();
+    const deadline = createDeadline();
     let usedModel = preferredModel;
     let responseText = null;
     let lastError = null;
@@ -88,7 +91,7 @@ export default async function handler(req, res) {
             prompt,
             { inlineData: { data: base64Data, mimeType } },
           ],
-          { generationConfig: GENERATION_CONFIG },
+          { generationConfig: GENERATION_CONFIG, ...deadline.requestOptions() },
         );
 
         const response = await result.response;
@@ -144,6 +147,11 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('Text detection error:', error);
+    if (isTimeoutError(error)) {
+      const aiError = classifyAiError(error);
+      res.status(aiError.status).json({ error: aiError.message, details: aiError.details });
+      return;
+    }
     res.status(500).json({
       error: 'Failed to detect text in image',
       details: error?.message || 'Unknown error',

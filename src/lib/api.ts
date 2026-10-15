@@ -13,6 +13,36 @@ const wrapNetworkError = (error: unknown, action: string): Error => {
   return new Error(`${action}: ${String(error)}`);
 };
 
+/**
+ * Error text from a failed response. Our API answers with JSON, but Vercel's own
+ * timeout / payload errors come back as plain text.
+ */
+const readErrorMessage = async (
+  response: Response,
+  fallback: string,
+  fields: string[] = ['error'],
+): Promise<string> => {
+  const body = await response.text().catch(() => '');
+  try {
+    const data = JSON.parse(body);
+    const message = fields
+      .map((field) => data?.[field])
+      .filter((value) => typeof value === 'string' && value.trim().length > 0)
+      .join(' - ');
+    if (message) return message;
+  } catch {
+    // not JSON — fall through to the status-based messages
+  }
+
+  if (response.status === 504) {
+    return 'The AI took too long to answer and the server stopped waiting. Please try again — a smaller or cropped image is faster.';
+  }
+  if (response.status === 413) {
+    return 'Image is too large to upload (server limit is about 4.5 MB). Please use a smaller image.';
+  }
+  return body.trim().slice(0, 300) || fallback;
+};
+
 export type ModelFamily = "gemini" | "openai";
 
 /** Steers OCR, translation and render rules for formulas and terminology */
@@ -81,6 +111,8 @@ export interface TranslateImageResponse {
   message?: string;
   analysis?: string;
   method?: 'ai-image' | 'unchanged' | 'none';
+  /** Set when the result was returned but may not match the original perfectly */
+  warning?: string;
   appliedCount?: number;
   error?: string;
 }
@@ -121,8 +153,7 @@ export const enhanceImage = async (request: EnhanceImageRequest): Promise<Enhanc
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `Failed to process image. Error: ${response.status}`);
+      throw new Error(await readErrorMessage(response, `Failed to process image. Error: ${response.status}`));
     }
 
     return await response.json();
@@ -140,19 +171,9 @@ export const translateImage = async (request: TranslateImageRequest): Promise<Tr
   });
 
   if (!response.ok) {
-    let errorMessage = `Failed to translate image. Status: ${response.status} ${response.statusText}`;
-    try {
-      const errorData = await response.json();
-      errorMessage = errorData.error || errorMessage;
-    } catch {
-      try {
-        const errorText = await response.text();
-        errorMessage = errorText || errorMessage;
-      } catch {
-        // keep default error message
-      }
-    }
-    throw new Error(errorMessage);
+    throw new Error(
+      await readErrorMessage(response, `Failed to translate image. Status: ${response.status} ${response.statusText}`)
+    );
   }
 
   return await response.json();
@@ -172,15 +193,7 @@ export const detectText = async (request: DetectTextRequest): Promise<DetectText
     });
 
     if (!response.ok) {
-      let errorMessage = `Failed to detect text. Status: ${response.status}`;
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.error || errorMessage;
-      } catch (e) {
-        const errorText = await response.text();
-        errorMessage = errorText || errorMessage;
-      }
-      throw new Error(errorMessage);
+      throw new Error(await readErrorMessage(response, `Failed to detect text. Status: ${response.status}`));
     }
 
     return await response.json();
@@ -203,20 +216,13 @@ export const translateText = async (request: TranslateTextRequest): Promise<Tran
     });
 
     if (!response.ok) {
-      let errorMessage = `Failed to translate text. Status: ${response.status}`;
-      try {
-        const errorData = await response.json();
-        const details = [errorData.error, errorData.details, errorData.instructions]
-          .filter((value) => typeof value === 'string' && value.trim().length > 0)
-          .join(' - ');
-        if (details.length > 0) {
-          errorMessage = details;
-        }
-      } catch (e) {
-        const errorText = await response.text();
-        errorMessage = errorText || errorMessage;
-      }
-      throw new Error(errorMessage);
+      throw new Error(
+        await readErrorMessage(response, `Failed to translate text. Status: ${response.status}`, [
+          'error',
+          'details',
+          'instructions',
+        ])
+      );
     }
 
     return await response.json();

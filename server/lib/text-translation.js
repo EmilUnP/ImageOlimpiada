@@ -1,7 +1,7 @@
 const MAX_ITEMS_PER_BATCH = 6;
 const MAX_CHARS_PER_BATCH = 1800;
 
-import { resolveAiProvider, getModelsFor } from './ai-provider.js';
+import { resolveAiProvider, getModelsFor, createDeadline, isTimeoutError } from './ai-provider.js';
 import { buildAcademicTextTranslationPrompt } from './textbook-prompts.js';
 import { resolveSubject } from './subject-rules.js';
 import {
@@ -135,6 +135,8 @@ const MODEL_RETRY_STATUSES = new Set([404]);
 const RETRYABLE_MODEL_MESSAGES = ['not found', 'unsupported', 'unknown model'];
 
 export const classifyGeminiError = (error) => {
+  if (error instanceof TranslationServiceError) return error;
+
   const message = error?.message || '';
 
   const provider = resolveAiProvider();
@@ -146,6 +148,13 @@ export const classifyGeminiError = (error) => {
 
   if (error?.status === 429 || message.includes('429') || message.toLowerCase().includes('quota')) {
     return new TranslationServiceError('Translation quota exceeded. Please wait and try again.', { statusCode: 429, details: message });
+  }
+
+  if (isTimeoutError(error)) {
+    return new TranslationServiceError('Translation took too long. Please retry, or translate fewer text blocks at once.', {
+      statusCode: 504,
+      details: message,
+    });
   }
 
   if (error?.status === 503 || message.includes('overloaded') || message.includes('unavailable')) {
@@ -188,9 +197,9 @@ const isBatchSplittableError = (error) => {
   );
 };
 
-const translateBatch = async ({ model, batch, targetLanguageName, subject, generationConfig }) => {
+const translateBatch = async ({ model, batch, targetLanguageName, subject, generationConfig, deadline }) => {
   const prompt = buildAcademicTextTranslationPrompt(batch, targetLanguageName, subject);
-  const result = await model.generateContent([prompt], { generationConfig });
+  const result = await model.generateContent([prompt], { generationConfig, ...deadline.requestOptions() });
   const response = await result.response;
   const text = response.text();
 
@@ -226,6 +235,8 @@ export const performTranslations = async ({
     topK: 32,
     maxOutputTokens: 2048,
   };
+  // Batches, retries and fallback models all run one after another inside one function call
+  const deadline = createDeadline();
 
   const { passthrough, toTranslate } = prepareItems(items);
   const passthroughResults = Object.fromEntries(passthrough.map((item) => [item.originalIndex, item.source]));
@@ -263,7 +274,7 @@ export const performTranslations = async ({
     const results = { ...passthroughResults };
 
     const translateAndRestore = async (batch) => {
-      const translations = await translateBatch({ model, batch, targetLanguageName, subject, generationConfig });
+      const translations = await translateBatch({ model, batch, targetLanguageName, subject, generationConfig, deadline });
       return batch.map((item, index) => ({
         item,
         ...unmaskFormulas(normaliseLatexBackslashes(translations[index] ?? '', item.source), item.formulas),
@@ -292,6 +303,7 @@ export const performTranslations = async ({
           targetLanguageName,
           subject,
           generationConfig,
+          deadline,
         });
         results[item.originalIndex] = normaliseLatexBackslashes(unmasked ?? '', item.source);
       }

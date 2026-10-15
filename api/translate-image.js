@@ -74,6 +74,7 @@ export default async function handler(req, res) {
       res.json({
         translatedImage: result.translatedImage,
         message: result.message,
+        warning: result.warning,
         targetLanguage: targetLangName,
         method: result.method,
         appliedCount: result.appliedCount,

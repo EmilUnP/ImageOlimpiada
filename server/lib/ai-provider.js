@@ -49,6 +49,59 @@ export const isModelNotFoundError = (error) =>
     error?.message || ''
   );
 
+/**
+ * Total time one API request may spend waiting on AI models (all fallbacks included).
+ * Keep it a little under vercel.json maxDuration so we answer with a clear 504
+ * instead of Vercel killing the function ("Task timed out after N seconds").
+ */
+export const getAiTimeoutMs = () => {
+  const seconds = Number(process.env.AI_TIMEOUT_SECONDS);
+  return (Number.isFinite(seconds) && seconds > 0 ? seconds : 280) * 1000;
+};
+
+/** A model attempt with less time left than this would only be cut off — stop instead */
+const MIN_ATTEMPT_MS = 5000;
+
+export class AiTimeoutError extends Error {
+  constructor(message = `AI model did not answer within ${Math.round(getAiTimeoutMs() / 1000)}s`) {
+    super(message);
+    this.name = 'AiTimeoutError';
+    this.status = 504;
+  }
+}
+
+/** One deadline per API request, shared by every model call and fallback it makes */
+export const createDeadline = (ms = getAiTimeoutMs()) => {
+  const endsAt = Date.now() + ms;
+  return {
+    /** Request options for the next model call — aborts it when the deadline passes */
+    requestOptions() {
+      const remaining = endsAt - Date.now();
+      if (remaining < MIN_ATTEMPT_MS) throw new AiTimeoutError();
+      return { timeout: remaining };
+    },
+  };
+};
+
+export const isTimeoutError = (error) =>
+  error instanceof AiTimeoutError ||
+  error?.status === 504 ||
+  ['AbortError', 'TimeoutError'].includes(error?.name) ||
+  /request aborted|timed out|deadline exceeded/i.test(error?.message || '');
+
+/** fetch that gives up after `timeout` ms with an AiTimeoutError */
+const fetchWithTimeout = async (url, init, timeout) => {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: timeout > 0 ? AbortSignal.timeout(timeout) : undefined,
+    });
+  } catch (error) {
+    if (isTimeoutError(error)) throw new AiTimeoutError();
+    throw error;
+  }
+};
+
 export const resolveAiProvider = () => {
   const explicit = process.env.AI_PROVIDER?.toLowerCase();
   const openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -246,7 +299,7 @@ class OpenRouterModel {
     this.modelName = modelName;
   }
 
-  async generateViaImageApi(prompt, imageData, mimeType) {
+  async generateViaImageApi(prompt, imageData, mimeType, timeout) {
     const body = {
       model: this.modelName,
       prompt,
@@ -263,11 +316,15 @@ class OpenRouterModel {
 
     console.log(`[ai-provider] OpenRouter Image API → ${this.modelName} (with reference image)`);
 
-    const response = await fetch(OPENROUTER_IMAGES_API_URL, {
-      method: 'POST',
-      headers: openRouterHeaders(this.apiKey),
-      body: JSON.stringify(body),
-    });
+    const response = await fetchWithTimeout(
+      OPENROUTER_IMAGES_API_URL,
+      {
+        method: 'POST',
+        headers: openRouterHeaders(this.apiKey),
+        body: JSON.stringify(body),
+      },
+      timeout
+    );
 
     const data = await response.json();
 
@@ -300,7 +357,7 @@ class OpenRouterModel {
         error.status = 400;
         throw error;
       }
-      return this.generateViaImageApi(text, imageData, mimeType);
+      return this.generateViaImageApi(text, imageData, mimeType, options.timeout);
     }
 
     const content = [{ type: 'text', text }];
@@ -334,11 +391,15 @@ class OpenRouterModel {
       body.max_tokens = getOpenRouterVisionMaxTokens();
     }
 
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: openRouterHeaders(this.apiKey),
-      body: JSON.stringify(body),
-    });
+    const response = await fetchWithTimeout(
+      OPENROUTER_API_URL,
+      {
+        method: 'POST',
+        headers: openRouterHeaders(this.apiKey),
+        body: JSON.stringify(body),
+      },
+      options.timeout
+    );
 
     const data = await response.json();
 
@@ -394,6 +455,7 @@ export async function generateWithProviderFallback({
   generationConfig = {},
   modelFamily = 'gemini',
   purpose = 'image',
+  deadline = createDeadline(),
 }) {
   const primary = resolveAiProvider();
   const family = resolveModelFamily(modelFamily);
@@ -434,8 +496,16 @@ export async function generateWithProviderFallback({
             ? new OpenRouterClient(apiKey)
             : new GoogleGenerativeAI(apiKey);
         const genModel = client.getGenerativeModel({ model: modelName });
-        return await genModel.generateContent(parts, { generationConfig: config });
+        return await genModel.generateContent(parts, {
+          generationConfig: config,
+          ...deadline.requestOptions(),
+        });
       } catch (error) {
+        // Out of time — another model would be cut off by the function limit too
+        if (isTimeoutError(error)) {
+          throw error instanceof AiTimeoutError ? error : new AiTimeoutError();
+        }
+
         lastError = error;
         const hasMoreModels = mi < models.length - 1;
         const hasMoreProviders = pi < providers.length - 1;
@@ -502,6 +572,14 @@ export const classifyAiError = (error) => {
       status: 429,
       message: 'API quota exceeded. You have used up your free tier limit.',
       retryAfter: '42 seconds',
+    };
+  }
+
+  if (isTimeoutError(error)) {
+    return {
+      status: 504,
+      message: `The AI model took too long to answer (limit ${Math.round(getAiTimeoutMs() / 1000)}s). Try again, use a smaller or cropped image, or pick a faster model in .env.`,
+      details: message,
     };
   }
 
