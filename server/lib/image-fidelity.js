@@ -315,7 +315,7 @@ export async function prepareForImageEdit({ data, mimeType, scale = 1 }) {
     data: buffer.toString('base64'),
     mimeType: isJpeg ? 'image/jpeg' : 'image/png',
     aspectRatio,
-    original: { rgb, width, height, mimeType, sourceWidth: source.width, sourceHeight: source.height },
+    original: { rgb, width, height, mimeType, sourceRgb: source.rgb, sourceWidth: source.width, sourceHeight: source.height },
     layout: {
       enlarge: Number((width / source.width).toFixed(2)),
       canvasWidth: Math.round(modelWidth * unitX),
@@ -662,13 +662,43 @@ const decodeEdited = async (editedData, layout) => {
  * Fallback when the merge fails: the model's answer mapped back onto the original frame and size
  * (no padding, no stretch), without restoring untouched pixels
  */
-export async function restoreEditedFrame({ prepared, editedData }) {
+export async function restoreEditedFrame({ prepared, editedData, mode = 'faithful' }) {
   const { original, layout } = prepared;
   const { canvasRgb, editedSize } = await decodeEdited(editedData, layout);
   const edited = await alignToOriginal(canvasRgb, layout, original, IDENTITY, upscaleSharpening(editedSize, layout, IDENTITY));
-  const encoded = await encodeRgb(edited, original.width, original.height, original.mimeType);
+  const result = mode === 'hd' ? { rgb: edited, width: original.width, height: original.height } : await toUploadSize(edited, null, original);
+  const encoded = await encodeRgb(result.rgb, result.width, result.height, original.mimeType);
   return `data:${encoded.mimeType};base64,${encoded.buffer.toString('base64')}`;
 }
+
+/**
+ * "Keep scan" results come back at the upload's own size. The work may have run on an enlarged
+ * copy (small scans, for a clean merge); the result is scaled back, and every pixel the edit did
+ * not touch is the upload's own, untouched by any resampling.
+ */
+const toUploadSize = async (rgb, alpha, original) => {
+  const { width, height, sourceWidth, sourceHeight, sourceRgb } = original;
+  if (!sourceRgb || (width === sourceWidth && height === sourceHeight)) return { rgb, width, height };
+  const [small, smallAlpha] = await Promise.all([
+    rawRgb(rgb, width, height).resize(sourceWidth, sourceHeight, { fit: 'fill', kernel: 'lanczos3' }).raw().toBuffer(),
+    alpha
+      ? sharp(alpha, { raw: { width, height, channels: 1 } })
+          .resize(sourceWidth, sourceHeight, { fit: 'fill' })
+          .toColourspace('b-w')
+          .raw()
+          .toBuffer()
+      : null,
+  ]);
+  if (!smallAlpha) return { rgb: small, width: sourceWidth, height: sourceHeight };
+  const out = Buffer.from(sourceRgb);
+  for (let p = 0; p < sourceWidth * sourceHeight; p++) {
+    if (smallAlpha[p] < 4) continue;
+    out[p * 3] = small[p * 3];
+    out[p * 3 + 1] = small[p * 3 + 1];
+    out[p * 3 + 2] = small[p * 3 + 2];
+  }
+  return { rgb: out, width: sourceWidth, height: sourceHeight };
+};
 
 const labelComponents = (mask, width, height) => {
   const labels = new Int32Array(mask.length).fill(-1);
@@ -1304,7 +1334,7 @@ export async function mergeEditedImage({ prepared, editedData, mode = 'faithful'
   };
 
   if (verdict === 'different-picture') {
-    const encoded = await encodeRgb(original.rgb, width, height, original.mimeType);
+    const encoded = await encodeRgb(original.sourceRgb, original.sourceWidth, original.sourceHeight, original.mimeType);
     return {
       dataUrl: `data:${encoded.mimeType};base64,${encoded.buffer.toString('base64')}`,
       warning:
@@ -1340,7 +1370,9 @@ export async function mergeEditedImage({ prepared, editedData, mode = 'faithful'
     }
   }
 
-  const encoded = await encodeRgb(out, width, height, original.mimeType);
+  const result = hd ? { rgb: out, width, height } : await toUploadSize(out, fullAlpha, original);
+  const encoded = await encodeRgb(result.rgb, result.width, result.height, original.mimeType);
+  report.output = `${result.width}x${result.height}`;
 
   let warning;
   if (verdict === 'rebuilt-layout') {
