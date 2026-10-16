@@ -330,6 +330,7 @@ app.post('/api/translate-image', async (req, res) => {
       translatedTexts: translatedTextPairs,
       correctedTexts,
       subject,
+      quality,
     } = req.body;
     const modelFamily = getTranslationModelFamily();
 
@@ -354,6 +355,7 @@ app.post('/api/translate-image', async (req, res) => {
         correctedTexts,
         modelFamily,
         subject,
+        quality,
       });
 
       if (!result.translatedImage) {

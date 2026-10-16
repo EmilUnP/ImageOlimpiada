@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { translateImage, TranslateImageRequest, detectText, DetectTextRequest, translateText, TranslateTextRequest, type Subject } from '@/lib/api';
+import { translateImage, TranslateImageRequest, detectText, DetectTextRequest, translateText, TranslateTextRequest, type Subject, type ResultQuality } from '@/lib/api';
 import { useImageUpload } from './useImageUpload';
 import { DetectedText, TranslatedText } from '@/lib/types';
 
@@ -80,7 +80,7 @@ export const useImageTranslation = () => {
     base64Image: string,
     targetLanguage: string,
     translatedTexts?: TranslatedText[],
-    settings?: { subject?: Subject }
+    settings?: { subject?: Subject; quality?: ResultQuality }
   ) => {
     setIsProcessing(true);
     try {
@@ -101,6 +101,7 @@ export const useImageTranslation = () => {
         targetLanguage,
         translatedTexts: textPairs,
         subject: settings?.subject,
+        quality: settings?.quality,
       };
 
       const data = await translateImage(request);
@@ -117,7 +118,7 @@ export const useImageTranslation = () => {
         if (data.warning) {
           toast.warning(data.warning);
         } else {
-          toast.success(`Text replaced on image (${langName})`);
+          toast.success(data.message || `Text replaced on image (${langName})`);
         }
         return data.translatedImage;
       }

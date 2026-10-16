@@ -3,6 +3,7 @@ import { Languages, Loader2, RotateCcw, Pencil, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImageUpload } from "@/components/shared/ImageUpload";
 import { OptionGrid } from "@/components/shared/OptionGrid";
+import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { OutputPanel } from "@/components/shared/OutputPanel";
 import { Panel } from "@/components/shared/Panel";
 import { WorkflowHeader } from "@/components/shared/WorkflowHeader";
@@ -12,7 +13,12 @@ import { useImageTranslation } from "@/hooks/useImageTranslation";
 import { LANGUAGES, SUBJECTS } from "@/lib/constants";
 import { downloadImage } from "@/lib/utils";
 import { toast } from "sonner";
-import type { Subject } from "@/lib/api";
+import type { Subject, ResultQuality } from "@/lib/api";
+
+const RESULT_OPTIONS: Array<{ id: ResultQuality; label: string }> = [
+  { id: "original", label: "Keep scan" },
+  { id: "hd", label: "HD" },
+];
 
 // Review table pulls in KaTeX — load it only once text has been detected
 const TextDetectionAndTranslation = lazy(() =>
@@ -27,6 +33,7 @@ interface TranslationWorkflowProps {
 export const TranslationWorkflow = ({ modelLabel }: TranslationWorkflowProps) => {
   const [selectedLanguage, setSelectedLanguage] = useState("az");
   const [subject, setSubject] = useState<Subject>("auto");
+  const [resultQuality, setResultQuality] = useState<ResultQuality>("original");
   const [showTextReview, setShowTextReview] = useState(false);
   const [isTranslatingText, setIsTranslatingText] = useState(false);
 
@@ -93,7 +100,7 @@ export const TranslationWorkflow = ({ modelLabel }: TranslationWorkflowProps) =>
         originalImage,
         selectedLanguage,
         finalTranslatedTexts,
-        { subject }
+        { subject, quality: resultQuality }
       );
     }
   };
@@ -114,7 +121,12 @@ export const TranslationWorkflow = ({ modelLabel }: TranslationWorkflowProps) =>
 
   const handleDownload = () => {
     if (!translatedImage) return;
-    downloadImage(translatedImage, "translated-image.png");
+    const extension = translatedImage.startsWith("data:image/jpeg")
+      ? "jpg"
+      : translatedImage.startsWith("data:image/webp")
+        ? "webp"
+        : "png";
+    downloadImage(translatedImage, `translated-image.${extension}`);
     toast.success("Image downloaded");
   };
 
@@ -163,6 +175,22 @@ export const TranslationWorkflow = ({ modelLabel }: TranslationWorkflowProps) =>
               onSelect={(id) => setSubject(id as Subject)}
               disabled={workspaceLocked}
             />
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-border/40 space-y-2">
+            <p className="text-xs font-semibold text-foreground">Result</p>
+            <SegmentedControl
+              options={RESULT_OPTIONS}
+              value={resultQuality}
+              onChange={(value) => setResultQuality(value as ResultQuality)}
+              disabled={isProcessing || isDetecting}
+              stacked={false}
+            />
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {resultQuality === "original"
+                ? "Only the text changes; the rest stays your scan."
+                : "Crisp AI redraw of the whole page, 3× larger."}
+            </p>
           </div>
 
           {modelLabel && (

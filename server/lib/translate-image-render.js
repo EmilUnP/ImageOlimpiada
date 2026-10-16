@@ -2,7 +2,7 @@ import { generateWithProviderFallback, getModelsFor } from './ai-provider.js';
 import { buildImageTextReplacementPrompt } from './textbook-prompts.js';
 import { resolveSubject } from './subject-rules.js';
 import { normaliseForCompare } from './formula-utils.js';
-import { prepareForImageEdit, mergeEditedImage } from './image-fidelity.js';
+import { prepareForImageEdit, mergeEditedImage, restoreEditedFrame, RESULT_QUALITY_SCALE } from './image-fidelity.js';
 
 const parseBase64Image = (base64Image) => {
   if (typeof base64Image !== 'string' || !base64Image.trim()) {
@@ -40,7 +40,10 @@ export async function renderTranslatedImage({
   correctedTexts,
   modelFamily = 'gemini',
   subject = 'auto',
+  quality = 'original',
 }) {
+  const scale = RESULT_QUALITY_SCALE[quality] ?? 1;
+  const hd = scale > 1;
   const validPairs = textPairs.filter((p) => p.original?.trim() && p.translated?.trim());
   // Formula/number-only blocks come back unchanged — sending them as "X → X" makes the image
   // model erase and redraw them, which flattens subscripts and fractions. Protect them instead.
@@ -79,7 +82,7 @@ export async function renderTranslatedImage({
   // Padding / merge need a decodable image; without it the model output is returned as before
   let prepared = null;
   try {
-    prepared = await prepareForImageEdit({ data, mimeType });
+    prepared = await prepareForImageEdit({ data, mimeType, scale });
   } catch (error) {
     console.warn('[translate-image] Could not prepare image for the fidelity merge — sending it unchanged:', error.message);
   }
@@ -100,12 +103,13 @@ export async function renderTranslatedImage({
     protectedFormulas: protectedTexts.length,
     subject: resolvedSubject,
     targetLanguage,
-    canvas: prepared ? `${prepared.layout.canvasWidth}x${prepared.layout.canvasHeight}` : 'original',
+    modelInput: prepared ? `${prepared.layout.model}, stretch ${prepared.layout.stretch}` : 'original',
   });
 
   const result = await generateWithProviderFallback({
     parts: [prompt, { inlineData: prepared ? { data: prepared.data, mimeType: prepared.mimeType } : { data, mimeType } }],
     modelFamily,
+    aspectRatio: prepared?.aspectRatio,
   });
 
   const response = await result.response;
@@ -120,12 +124,16 @@ export async function renderTranslatedImage({
     };
   }
 
-  const message = `Text replaced on image (${targetLangName || targetLanguage}).`;
+  const enlarge = prepared?.layout.enlarge ?? 1;
+  const size = prepared ? `${prepared.original.width}×${prepared.original.height}` : '';
+  let message = `Text replaced on image (${targetLangName || targetLanguage}).`;
+  if (hd && prepared) message += ` HD result: ${size} (${enlarge}× the upload).`;
+  else if (enlarge > 1) message += ` Small image enlarged ${enlarge}× to ${size} for sharper text.`;
   const appliedCount = pairs.length || correctedTexts?.length || 0;
 
   if (prepared) {
     try {
-      const merged = await mergeEditedImage({ prepared, editedData: edited.data });
+      const merged = await mergeEditedImage({ prepared, editedData: edited.data, mode: hd ? 'hd' : 'faithful' });
       console.log('[translate-image] Done — merged text edits onto the original', merged.stats);
       return {
         translatedImage: merged.dataUrl,
@@ -135,7 +143,21 @@ export async function renderTranslatedImage({
         appliedCount,
       };
     } catch (error) {
-      console.error('[translate-image] Fidelity merge failed — returning the raw model output:', error);
+      console.error('[translate-image] Fidelity merge failed — falling back to the model output in the original frame:', error);
+    }
+
+    // Still the original size and framing — never the model's padded / stretched canvas
+    try {
+      return {
+        translatedImage: await restoreEditedFrame({ prepared, editedData: edited.data }),
+        method: 'ai-image',
+        message,
+        warning:
+          "Could not merge the edit onto the original, so the model's version is shown — it may differ from the original outside the text. Try again.",
+        appliedCount,
+      };
+    } catch (error) {
+      console.error('[translate-image] Could not restore the original frame — returning the raw model output:', error);
     }
   }
 

@@ -30,6 +30,7 @@ export default async function handler(req, res) {
       translatedTexts,
       correctedTexts,
       subject,
+      quality,
     } = req.body ?? {};
     const modelFamily = getTranslationModelFamily();
 
@@ -61,6 +62,7 @@ export default async function handler(req, res) {
         correctedTexts,
         modelFamily,
         subject,
+        quality,
       });
 
       if (!result.translatedImage) {

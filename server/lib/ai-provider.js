@@ -299,7 +299,7 @@ class OpenRouterModel {
     this.modelName = modelName;
   }
 
-  async generateViaImageApi(prompt, imageData, mimeType, timeout) {
+  async generateViaImageApi(prompt, imageData, mimeType, timeout, aspectRatio) {
     const body = {
       model: this.modelName,
       prompt,
@@ -313,8 +313,10 @@ class OpenRouterModel {
     };
 
     body.quality = 'high';
+    // Without it the provider picks the frame itself and re-composes the picture to fit
+    if (aspectRatio) body.aspect_ratio = aspectRatio;
 
-    console.log(`[ai-provider] OpenRouter Image API → ${this.modelName} (with reference image)`);
+    console.log(`[ai-provider] OpenRouter Image API → ${this.modelName} (with reference image${aspectRatio ? `, ${aspectRatio}` : ''})`);
 
     const response = await fetchWithTimeout(
       OPENROUTER_IMAGES_API_URL,
@@ -357,7 +359,7 @@ class OpenRouterModel {
         error.status = 400;
         throw error;
       }
-      return this.generateViaImageApi(text, imageData, mimeType, options.timeout);
+      return this.generateViaImageApi(text, imageData, mimeType, options.timeout, options.aspectRatio);
     }
 
     const content = [{ type: 'text', text }];
@@ -384,6 +386,7 @@ class OpenRouterModel {
     const modalities = getOpenRouterImageModalities(this.modelName);
     if (modalities) {
       body.modalities = modalities;
+      if (options.aspectRatio) body.image_config = { aspect_ratio: options.aspectRatio };
       if (body.max_tokens === undefined) {
         body.max_tokens = OPENROUTER_IMAGE_MAX_TOKENS;
       }
@@ -449,6 +452,7 @@ const isRetryableProviderError = (error) => {
 /**
  * Image output (enhance / translate image): walk the primary provider's .env model chain,
  * then the other provider's own chain when it has a key.
+ * `aspectRatio` (e.g. "16:9") asks OpenRouter image models for that output frame.
  */
 export async function generateWithProviderFallback({
   parts,
@@ -456,6 +460,7 @@ export async function generateWithProviderFallback({
   modelFamily = 'gemini',
   purpose = 'image',
   deadline = createDeadline(),
+  aspectRatio,
 }) {
   const primary = resolveAiProvider();
   const family = resolveModelFamily(modelFamily);
@@ -498,6 +503,7 @@ export async function generateWithProviderFallback({
         const genModel = client.getGenerativeModel({ model: modelName });
         return await genModel.generateContent(parts, {
           generationConfig: config,
+          ...(provider === 'openrouter' && aspectRatio ? { aspectRatio } : {}),
           ...deadline.requestOptions(),
         });
       } catch (error) {

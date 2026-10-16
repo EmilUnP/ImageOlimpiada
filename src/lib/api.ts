@@ -94,6 +94,9 @@ export interface TranslateTextResponse {
   error?: string;
 }
 
+/** "original" keeps the scan's own look; "hd" returns a crisp redraw of the whole page at 3× the upload size */
+export type ResultQuality = "original" | "hd";
+
 export interface TranslateImageRequest {
   image: string;
   targetLanguage: string;
@@ -103,6 +106,7 @@ export interface TranslateImageRequest {
   }>;
   correctedTexts?: string[];
   subject?: Subject;
+  quality?: ResultQuality;
 }
 
 export interface TranslateImageResponse {
