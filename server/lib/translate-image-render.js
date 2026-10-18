@@ -124,11 +124,10 @@ export async function renderTranslatedImage({
     };
   }
 
-  const enlarge = prepared?.layout.enlarge ?? 1;
-  const size = prepared ? `${prepared.original.width}×${prepared.original.height}` : '';
   let message = `Text replaced on image (${targetLangName || targetLanguage}).`;
-  if (hd && prepared) message += ` HD result: ${size} (${enlarge}× the upload).`;
-  else if (enlarge > 1) message += ` Small image enlarged ${enlarge}× to ${size} for sharper text.`;
+  if (hd && prepared) {
+    message += ` HD result: ${prepared.original.width}×${prepared.original.height} (${prepared.layout.enlarge}× the upload).`;
+  }
   const appliedCount = pairs.length || correctedTexts?.length || 0;
 
   if (prepared) {
@@ -149,7 +148,7 @@ export async function renderTranslatedImage({
     // Still the original size and framing — never the model's padded / stretched canvas
     try {
       return {
-        translatedImage: await restoreEditedFrame({ prepared, editedData: edited.data }),
+        translatedImage: await restoreEditedFrame({ prepared, editedData: edited.data, mode: hd ? 'hd' : 'faithful' }),
         method: 'ai-image',
         message,
         warning:
