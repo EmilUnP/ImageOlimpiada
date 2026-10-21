@@ -12,4 +12,6 @@ export interface DetectedText {
 
 export interface TranslatedText extends DetectedText {
   translatedText: string;
+  /** Typed by the user — a bulk re-translate keeps it */
+  edited?: boolean;
 }

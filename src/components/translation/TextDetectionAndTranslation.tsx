@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -8,11 +8,13 @@ import {
   Edit2,
   ImageIcon,
   Loader2,
+  PenLine,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isFormulaOnly } from "@/lib/formula";
+import { mergeMachineTranslations, upsertTranslation } from "@/lib/translations";
 import { MathText } from "@/components/shared/MathText";
 import { TranslationPhaseBanner } from "./TranslationPhaseBanner";
 import type { DetectedText, TranslatedText } from "@/lib/types";
@@ -33,6 +35,11 @@ interface TextDetectionAndTranslationProps {
   isApplying?: boolean;
 }
 
+type EditField = "original" | "translated";
+
+const textButtonClass =
+  "block w-full -mx-1 px-1 rounded-sm text-left leading-snug break-words cursor-text hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent";
+
 export const TextDetectionAndTranslation = ({
   image,
   detectedTexts,
@@ -49,9 +56,15 @@ export const TextDetectionAndTranslation = ({
   const [originalTexts, setOriginalTexts] = useState<DetectedText[]>(detectedTexts);
   const [translatedTexts, setTranslatedTexts] = useState<TranslatedText[]>(initialTranslations ?? []);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingField, setEditingField] = useState<"original" | "translated" | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [editFocus, setEditFocus] = useState<EditField>("original");
+  const [draft, setDraft] = useState({ original: "", translated: "" });
   const [hasTranslated, setHasTranslated] = useState(!!initialTranslations?.length);
+  const [bulkTranslating, setBulkTranslating] = useState(false);
+  // Rows waiting on their own machine translation (→, or after their Russian text changed)
+  const [busyRows, setBusyRows] = useState<string[]>([]);
+
+  const originalEditorRef = useRef<HTMLTextAreaElement>(null);
+  const translatedEditorRef = useRef<HTMLTextAreaElement>(null);
 
   // Our own edits echo back through detectedTexts — only a fresh detection should reset the table
   const syncedTexts = useRef(detectedTexts);
@@ -69,46 +82,93 @@ export const TextDetectionAndTranslation = ({
       setTranslatedTexts([]);
       setHasTranslated(false);
       setEditingId(null);
-      setEditingField(null);
     }
   }, [detectedTexts]);
 
-  const lowConfidenceCount = originalTexts.filter((t) => t.confidence < 0.7).length;
-  const translatedCount = translatedTexts.filter((t) => t.translatedText?.trim()).length;
-  const allTranslated =
-    hasTranslated &&
-    translatedTexts.length > 0 &&
-    translatedTexts.every((t) => t.translatedText.trim().length > 0);
+  // Open the editor with the caret after the text, ready to fix the end or keep typing
+  useEffect(() => {
+    if (!editingId) return;
+    const editor = (editFocus === "translated" ? translatedEditorRef : originalEditorRef).current;
+    if (!editor) return;
+    editor.focus();
+    editor.setSelectionRange(editor.value.length, editor.value.length);
+  }, [editingId, editFocus]);
 
-  const startEdit = (id: string, field: "original" | "translated", value: string) => {
-    setEditingId(id);
-    setEditingField(field);
-    setEditValue(value);
+  const getTranslationFor = (id: string, index: number) =>
+    translatedTexts.find((t) => t.id === id) ?? (hasTranslated ? translatedTexts[index] : undefined);
+
+  const rowTranslations = originalTexts.map((item, index) => getTranslationFor(item.id, index));
+  const lowConfidenceCount = originalTexts.filter((t) => t.confidence < 0.7).length;
+  const translatedCount = rowTranslations.filter((t) => t?.translatedText?.trim()).length;
+  const editedCount = rowTranslations.filter((t) => t?.edited).length;
+  const allTranslated = hasTranslated && originalTexts.length > 0 && translatedCount === originalTexts.length;
+  const busy = isTranslating || bulkTranslating || busyRows.length > 0;
+  const isEditingAny = editingId !== null;
+
+  const startEdit = (item: DetectedText, field: EditField, translation?: TranslatedText) => {
+    setEditingId(item.id);
+    setEditFocus(field);
+    setDraft({ original: item.text, translated: translation?.translatedText ?? "" });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setEditingField(null);
-    setEditValue("");
+    setDraft({ original: "", translated: "" });
   };
 
-  const saveEdit = (id: string) => {
-    if (editingField === "original") {
-      const updated = originalTexts.map((t) =>
-        t.id === id ? { ...t, text: editValue.trim() || t.text, confidence: 1 } : t
-      );
-      setOriginalTexts(updated);
-      pushTextsUpdate(updated);
-      if (hasTranslated) {
-        setTranslatedTexts([]);
-        setHasTranslated(false);
+  const setRowBusy = (id: string, isBusy: boolean) =>
+    setBusyRows((prev) => (isBusy ? [...prev, id] : prev.filter((rowId) => rowId !== id)));
+
+  /** Fresh machine translation for one row — also the way to drop a translation the user typed */
+  const translateRow = async (item: DetectedText, index: number) => {
+    const previous = translatedTexts.find((t) => t.id === item.id);
+    setRowBusy(item.id, true);
+    try {
+      const [fresh] = await onTranslate([item]);
+      const text = fresh?.translatedText?.trim();
+      if (!text) {
+        toast.error(`Line ${index + 1} was not translated. Try again or type the translation yourself.`);
+        return;
       }
-    } else if (editingField === "translated") {
-      setTranslatedTexts((prev) =>
-        prev.map((t) =>
-          t.id === id ? { ...t, translatedText: editValue.trim() } : t
-        )
-      );
+
+      setTranslatedTexts((prev) => upsertTranslation(prev, { ...item, translatedText: text }));
+      if (previous?.edited) {
+        toast(`Line ${index + 1}: your translation was replaced by a machine one`, {
+          action: {
+            label: "Undo",
+            onClick: () => setTranslatedTexts((prev) => upsertTranslation(prev, previous)),
+          },
+        });
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Translation failed");
+    } finally {
+      setRowBusy(item.id, false);
+    }
+  };
+
+  const saveEdit = (item: DetectedText, index: number, translation?: TranslatedText) => {
+    const original = draft.original.trim() || item.text;
+    const originalChanged = original !== item.text.trim();
+    const updatedItem = { ...item, text: original, confidence: 1 };
+    const updated = originalTexts.map((t) => (t.id === item.id ? updatedItem : t));
+    setOriginalTexts(updated);
+    pushTextsUpdate(updated);
+
+    if (hasTranslated) {
+      const typed = draft.translated.trim();
+      if (typed && typed !== (translation?.translatedText ?? "").trim()) {
+        setTranslatedTexts((prev) =>
+          upsertTranslation(prev, { ...updatedItem, translatedText: typed, edited: true })
+        );
+      } else if (originalChanged && translation?.edited) {
+        // A translation the user typed stays, even when the Russian line under it is corrected
+        setTranslatedTexts((prev) => upsertTranslation(prev, { ...translation, ...updatedItem }));
+      } else if (originalChanged) {
+        // The machine translation was for the old text — fetch one for this line only
+        setTranslatedTexts((prev) => upsertTranslation(prev, { ...updatedItem, translatedText: "" }));
+        void translateRow(updatedItem, index);
+      }
     }
     cancelEdit();
   };
@@ -121,11 +181,19 @@ export const TextDetectionAndTranslation = ({
     if (updated.length === 0) setHasTranslated(false);
   };
 
+  /** Translate every line, or on Re-translate every line the user has not typed themselves */
   const handleTranslate = async () => {
     if (originalTexts.length === 0) return;
 
+    const rows = originalTexts.filter((item, index) => !rowTranslations[index]?.edited);
+    if (rows.length === 0) {
+      toast.info("You typed every translation yourself, so nothing was re-translated. Use → on a line to get a machine translation for it.");
+      return;
+    }
+
+    setBulkTranslating(true);
     try {
-      const translations = await onTranslate(originalTexts);
+      const translations = await onTranslate(rows);
       if (!translations?.length) {
         toast.error("No translations received. Please try again.");
         return;
@@ -137,28 +205,31 @@ export const TextDetectionAndTranslation = ({
         return;
       }
 
-      setTranslatedTexts(translations);
+      setTranslatedTexts((prev) => mergeMachineTranslations(prev, translations));
       setHasTranslated(true);
+      if (editedCount > 0) {
+        toast.info(
+          `Kept ${editedCount} translation${editedCount === 1 ? "" : "s"} you typed. Use → on a line to replace it with a machine one.`
+        );
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Translation failed");
+    } finally {
+      setBulkTranslating(false);
     }
   };
 
   const handleApply = () => {
-    const valid = translatedTexts.filter((t) => t.translatedText?.trim());
-    if (valid.length === 0) return;
+    // Current table rows, so a corrected Russian line and a typed translation both reach the image
+    const applied = originalTexts.flatMap((item, index) => {
+      const translation = rowTranslations[index];
+      const translatedText = translation?.translatedText?.trim();
+      return translatedText ? [{ ...item, translatedText, edited: translation.edited }] : [];
+    });
+    if (applied.length === 0) return;
 
-    onApply(
-      valid.map((t) => ({
-        ...t,
-        text: t.text || originalTexts.find((o) => o.id === t.id)?.text || "",
-        translatedText: t.translatedText.trim(),
-      }))
-    );
+    onApply(applied);
   };
-
-  const getTranslationFor = (id: string, index: number) =>
-    translatedTexts.find((t) => t.id === id) ?? (hasTranslated ? translatedTexts[index] : undefined);
 
   return (
     <div className="space-y-4">
@@ -167,7 +238,7 @@ export const TextDetectionAndTranslation = ({
         title={hasTranslated ? "Check translations" : "Check detected text"}
         description={
           hasTranslated
-            ? `Make sure each ${targetLanguageName} line is correct, then apply it to the image. The original Russian text will be replaced in place.`
+            ? `Make sure each ${targetLanguageName} line is correct — click a line to type your own translation — then apply it to the image. The original Russian text will be replaced in place.`
             : `We found ${originalTexts.length} text block${originalTexts.length === 1 ? "" : "s"}. Fix any OCR mistakes — check that formulas show the right powers, subscripts and fractions — then translate to ${targetLanguageName}.`
         }
       />
@@ -192,7 +263,12 @@ export const TextDetectionAndTranslation = ({
           </p>
           <p>{originalTexts.length} labels detected</p>
           {hasTranslated && (
-            <p className="text-primary font-medium">{translatedCount} translated</p>
+            <p className="text-primary font-medium">
+              {translatedCount} translated
+              {editedCount > 0 && (
+                <span className="font-normal text-muted-foreground"> · {editedCount} edited by you</span>
+              )}
+            </p>
           )}
         </div>
       </div>
@@ -217,14 +293,26 @@ export const TextDetectionAndTranslation = ({
             </div>
           ) : (
             originalTexts.map((item, index) => {
-              const translation = getTranslationFor(item.id, index);
+              const translation = rowTranslations[index];
               const isLowConfidence = item.confidence < 0.7;
-              const isEditingOriginal = editingId === item.id && editingField === "original";
-              const isEditingTranslated = editingId === item.id && editingField === "translated";
+              const isEditing = editingId === item.id;
+              const isRowBusy = busyRows.includes(item.id);
+              const rowLocked = bulkTranslating || isRowBusy || isApplying;
               const formulaOnly = isFormulaOnly(item.text);
               const keptAsIs =
                 formulaOnly &&
+                !translation?.edited &&
                 translation?.translatedText?.replace(/\s+/g, " ").trim() === item.text.replace(/\s+/g, " ").trim();
+
+              const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelEdit();
+                } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  saveEdit(item, index, translation);
+                }
+              };
 
               return (
                 <div
@@ -243,29 +331,26 @@ export const TextDetectionAndTranslation = ({
                   </span>
 
                   <div className="min-w-0">
-                    {isEditingOriginal ? (
-                      <div className="space-y-1.5">
-                        <Textarea
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          className="min-h-[52px] text-sm font-mono"
-                          autoFocus
-                        />
-                        <p className="text-[10px] text-muted-foreground leading-snug">
-                          Formulas go between $…$ in LaTeX: $x^2$, $H_2SO_4$, $\frac{"{a}{b}"}$
-                        </p>
-                        <div className="flex gap-1">
-                          <Button size="sm" className="h-7 text-xs" onClick={() => saveEdit(item.id)}>
-                            Save
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelEdit}>
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
+                    {isEditing ? (
+                      <Textarea
+                        ref={originalEditorRef}
+                        value={draft.original}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, original: e.target.value }))}
+                        onKeyDown={handleEditorKeyDown}
+                        aria-label="Russian (original)"
+                        className="min-h-[52px] text-sm font-mono"
+                      />
                     ) : (
                       <div className="space-y-1">
-                        <p className="leading-snug break-words">{item.text ? <MathText text={item.text} /> : "—"}</p>
+                        <button
+                          type="button"
+                          className={textButtonClass}
+                          title="Click to edit"
+                          disabled={rowLocked}
+                          onClick={() => startEdit(item, "original", translation)}
+                        >
+                          {item.text ? <MathText text={item.text} /> : "—"}
+                        </button>
                         {formulaOnly && (
                           <span className="inline-block rounded border border-primary/30 bg-primary/5 px-1.5 py-px text-[10px] font-medium text-primary">
                             Formula · kept as is
@@ -277,63 +362,81 @@ export const TextDetectionAndTranslation = ({
 
                   {hasTranslated && (
                     <div className="min-w-0">
-                      {isEditingTranslated ? (
-                        <div className="space-y-1.5">
-                          <Textarea
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            className="min-h-[52px] text-sm"
-                            autoFocus
-                          />
-                          <div className="flex gap-1">
-                            <Button size="sm" className="h-7 text-xs" onClick={() => saveEdit(item.id)}>
-                              Save
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelEdit}>
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p
-                          className={cn(
-                            "leading-snug break-words",
-                            keptAsIs ? "text-muted-foreground" : "text-foreground"
-                          )}
-                        >
-                          {translation?.translatedText?.trim() ? (
-                            <MathText text={translation.translatedText.trim()} />
-                          ) : (
-                            "—"
-                          )}
+                      {isEditing ? (
+                        <Textarea
+                          ref={translatedEditorRef}
+                          value={draft.translated}
+                          onChange={(e) => setDraft((prev) => ({ ...prev, translated: e.target.value }))}
+                          onKeyDown={handleEditorKeyDown}
+                          aria-label={`${targetLanguageName} translation`}
+                          placeholder={`Type the ${targetLanguageName} text`}
+                          className="min-h-[52px] text-sm font-mono"
+                        />
+                      ) : isRowBusy ? (
+                        <p className="flex items-center gap-1.5 pt-0.5 text-xs text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Translating…
                         </p>
+                      ) : (
+                        <div className="space-y-1">
+                          <button
+                            type="button"
+                            className={cn(textButtonClass, keptAsIs ? "text-muted-foreground" : "text-foreground")}
+                            title={`Click to type your own ${targetLanguageName} translation`}
+                            disabled={rowLocked}
+                            onClick={() => startEdit(item, "translated", translation)}
+                          >
+                            {translation?.translatedText?.trim() ? (
+                              <MathText text={translation.translatedText.trim()} />
+                            ) : (
+                              "—"
+                            )}
+                          </button>
+                          {translation?.edited && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-px text-[10px] font-medium text-muted-foreground"
+                              title="You typed this translation. Re-translate keeps it; → replaces it with a machine one."
+                            >
+                              <PenLine className="h-2.5 w-2.5" />
+                              Edited
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
 
                   <div className="flex justify-end gap-0.5 pt-0.5">
-                    {!isEditingOriginal && !isEditingTranslated && (
+                    {!isEditing && (
                       <>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
-                          title="Edit original"
-                          onClick={() => startEdit(item.id, "original", item.text)}
+                          title={hasTranslated ? "Edit text and translation" : "Edit original"}
+                          disabled={rowLocked}
+                          onClick={() => startEdit(item, hasTranslated ? "translated" : "original", translation)}
                         >
                           <Edit2 className="h-3.5 w-3.5" />
                         </Button>
-                        {hasTranslated && translation && (
+                        {hasTranslated && (
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7"
-                            title="Edit translation"
-                            onClick={() =>
-                              startEdit(item.id, "translated", translation.translatedText || "")
+                            title={
+                              translation?.edited
+                                ? "Replace your translation with a machine one"
+                                : "Translate this line again"
                             }
+                            disabled={rowLocked}
+                            onClick={() => translateRow(item, index)}
                           >
-                            <ArrowRight className="h-3.5 w-3.5" />
+                            {isRowBusy ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            )}
                           </Button>
                         )}
                         <Button
@@ -341,6 +444,7 @@ export const TextDetectionAndTranslation = ({
                           size="icon"
                           className="h-7 w-7 text-destructive hover:text-destructive"
                           title="Remove"
+                          disabled={rowLocked}
                           onClick={() => removeText(item.id)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -348,6 +452,22 @@ export const TextDetectionAndTranslation = ({
                       </>
                     )}
                   </div>
+
+                  {isEditing && (
+                    <div className="col-start-2 col-end-[-1] space-y-1.5">
+                      <p className="text-[10px] text-muted-foreground leading-snug">
+                        Formulas go between $…$ in LaTeX: $x^2$, $H_2SO_4$, $\frac{"{a}{b}"}$ · Ctrl+Enter saves, Esc cancels
+                      </p>
+                      <div className="flex gap-1">
+                        <Button size="sm" className="h-7 text-xs" onClick={() => saveEdit(item, index, translation)}>
+                          Save
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelEdit}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -357,12 +477,12 @@ export const TextDetectionAndTranslation = ({
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 border-t border-border/40">
         {onCancel && (
-          <Button variant="ghost" size="sm" onClick={onCancel} disabled={isTranslating || isApplying}>
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy || isApplying}>
             Back to result
           </Button>
         )}
         {onBack && (
-          <Button variant="ghost" size="sm" onClick={onBack} disabled={isTranslating || isApplying}>
+          <Button variant="ghost" size="sm" onClick={onBack} disabled={busy || isApplying}>
             Upload different image
           </Button>
         )}
@@ -371,10 +491,11 @@ export const TextDetectionAndTranslation = ({
           {!hasTranslated ? (
             <Button
               onClick={handleTranslate}
-              disabled={isTranslating || originalTexts.length === 0}
+              disabled={busy || isEditingAny || originalTexts.length === 0}
+              title={isEditingAny ? "Save or cancel the line you are editing first" : undefined}
               className="w-full sm:w-auto gap-2"
             >
-              {isTranslating ? (
+              {bulkTranslating ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Translating…
@@ -388,18 +509,30 @@ export const TextDetectionAndTranslation = ({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  setHasTranslated(false);
-                  setTranslatedTexts([]);
-                }}
-                disabled={isApplying}
-                className="w-full sm:w-auto"
+                onClick={handleTranslate}
+                disabled={isApplying || busy || isEditingAny}
+                title={
+                  isEditingAny
+                    ? "Save or cancel the line you are editing first"
+                    : editedCount > 0
+                      ? `Translations you typed (${editedCount}) are kept`
+                      : undefined
+                }
+                className="w-full sm:w-auto gap-2"
               >
-                Re-translate
+                {bulkTranslating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Re-translating…
+                  </>
+                ) : (
+                  "Re-translate"
+                )}
               </Button>
               <Button
                 onClick={handleApply}
-                disabled={isApplying || !allTranslated}
+                disabled={isApplying || busy || isEditingAny || !allTranslated}
+                title={isEditingAny ? "Save or cancel the line you are editing first" : undefined}
                 className="w-full sm:w-auto gap-2"
               >
                 {isApplying ? (
